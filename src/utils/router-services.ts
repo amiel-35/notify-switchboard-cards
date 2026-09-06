@@ -3,11 +3,12 @@ import type { TargetMap } from "../types";
 
 export const SWITCHBOARD_DOMAIN = "notify_switchboard";
 
-export type RouterServiceName = "acknowledge" | "snooze" | "silence" | "unsnooze";
+export type RouterServiceName = "acknowledge" | "snooze" | "silence" | "unsnooze" | "unsilence";
 
 /**
  * The router services (`notify_switchboard.acknowledge` / `snooze` /
- * `silence` / `unsnooze`) only land in Notify Switchboard 0.2.0. Cards must
+ * `silence` / `unsnooze` / `unsilence`) only land in Notify Switchboard
+ * 0.2.0. Cards must
  * keep working against 0.1.x by checking `hass.services` before calling
  * them and degrading to the native `alert.*` actions instead.
  */

@@ -1,5 +1,11 @@
-import { LitElement, css, html, nothing, type TemplateResult } from "lit";
-import type { HomeAssistant, LovelaceCard, LovelaceCardConfig } from "../../ha-types";
+import { LitElement, css, html, nothing, type PropertyValues, type TemplateResult } from "lit";
+import type {
+  HassEntity,
+  HomeAssistant,
+  LovelaceCard,
+  LovelaceCardConfig,
+  LovelaceGridOptions,
+} from "../../ha-types";
 import type { SwitchboardSilenceTileConfig } from "../../types";
 import { DEFAULT_WAKE_TIME } from "../../types";
 import { sharedStyles } from "../../styles/shared-styles";
@@ -7,16 +13,23 @@ import { t } from "../../i18n";
 import { formatRelativeDuration } from "../../utils/format-duration";
 import { minutesUntilWakeTime } from "../../utils/wake-time";
 import { hasRouterService, SWITCHBOARD_DOMAIN } from "../../utils/router-services";
+import {
+  validateEntityId,
+  validateOptionalString,
+  validateTimeOfDay,
+} from "../../utils/config-validation";
 
 const TICK_INTERVAL_MS = 30_000;
+const CARD_NAME = "switchboard-silence-tile";
 
 /**
  * `switchboard-silence-tile` shows one person's Notify Switchboard silence
  * state (`binary_sensor.<person>_silenced`, `sensor.<person>_active_snoozes`,
  * `sensor.<person>_last_notification`) with silence / clear controls. The
  * router services those controls call (`notify_switchboard.silence` /
- * `unsnooze`) only exist from 0.2.0 onward, so every button disables itself
- * with an explanatory tooltip when the service is not registered yet.
+ * `unsnooze` / `unsilence`) only exist from 0.2.0 onward, so every button
+ * marks itself `aria-disabled` (staying focusable, so a screen-reader user
+ * can find out *why*) and the tile shows a one-line explanation.
  */
 export class SwitchboardSilenceTile extends LitElement implements LovelaceCard {
   static override styles = [
@@ -74,29 +87,59 @@ export class SwitchboardSilenceTile extends LitElement implements LovelaceCard {
 
   static getStubConfig(hass?: HomeAssistant): SwitchboardSilenceTileConfig {
     const person = Object.keys(hass?.states ?? {}).find((id) => id.startsWith("person."));
-    return {
+    const stub: SwitchboardSilenceTileConfig = {
       type: "custom:switchboard-silence-tile",
-      person: person ?? "",
       wake_time: DEFAULT_WAKE_TIME,
     };
+    if (person) {
+      stub.person = person;
+    }
+    return stub;
   }
 
   setConfig(config: LovelaceCardConfig): void {
-    const cardConfig = config as SwitchboardSilenceTileConfig;
-    if (!cardConfig || typeof cardConfig !== "object") {
-      throw new Error("Invalid configuration");
+    if (!config || typeof config !== "object" || Array.isArray(config)) {
+      throw new Error(`${CARD_NAME}: configuration must be a mapping`);
     }
-    this._config = { wake_time: DEFAULT_WAKE_TIME, ...cardConfig };
+    const raw = config as Record<string, unknown>;
+
+    const validated: SwitchboardSilenceTileConfig = {
+      ...(config as SwitchboardSilenceTileConfig),
+      wake_time: validateTimeOfDay(CARD_NAME, "wake_time", raw.wake_time) ?? DEFAULT_WAKE_TIME,
+    };
+
+    const person = validateEntityId(CARD_NAME, "person", raw.person, "person");
+    if (person === undefined) {
+      delete validated.person;
+    } else {
+      validated.person = person;
+    }
+
+    const title = validateOptionalString(CARD_NAME, "title", raw.title);
+    if (title === undefined) {
+      delete validated.title;
+    } else {
+      validated.title = title;
+    }
+
+    this._config = validated;
   }
 
   getCardSize(): number {
     return 3;
   }
 
+  getGridOptions(): LovelaceGridOptions {
+    return { rows: "auto", columns: 6, min_rows: 2, min_columns: 3 };
+  }
+
   override connectedCallback(): void {
     super.connectedCallback();
     this._tickHandle = setInterval(() => {
-      this._now = Date.now();
+      // Only the "last notification" line ages; skip the tick otherwise.
+      if (this._hasLiveDuration()) {
+        this._now = Date.now();
+      }
     }, TICK_INTERVAL_MS);
   }
 
@@ -108,12 +151,56 @@ export class SwitchboardSilenceTile extends LitElement implements LovelaceCard {
     }
   }
 
+  protected override shouldUpdate(changed: PropertyValues): boolean {
+    if (changed.size !== 1 || !changed.has("hass")) {
+      return true;
+    }
+    const oldHass = changed.get("hass") as HomeAssistant | undefined;
+    const hass = this.hass;
+    if (!oldHass || !hass) {
+      return true;
+    }
+    if (oldHass.services !== hass.services || oldHass.locale !== hass.locale) {
+      return true;
+    }
+    for (const entityId of this._watchedEntityIds()) {
+      if (oldHass.states[entityId] !== hass.states[entityId]) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** The person plus the three entities derived from its object id. */
+  private _watchedEntityIds(): string[] {
+    const person = this._config?.person;
+    const objectId = this._objectId();
+    if (!person || !objectId) {
+      return person ? [person] : [];
+    }
+    return [
+      person,
+      `binary_sensor.${objectId}_silenced`,
+      `sensor.${objectId}_active_snoozes`,
+      `sensor.${objectId}_last_notification`,
+    ];
+  }
+
   private _objectId(): string | undefined {
     const person = this._config?.person;
     if (!person || !person.includes(".")) {
       return undefined;
     }
     return person.split(".")[1];
+  }
+
+  private _hasLiveDuration(): boolean {
+    const objectId = this._objectId();
+    if (!objectId) {
+      return false;
+    }
+    const state = this.hass?.states[`sensor.${objectId}_last_notification`]?.state;
+    return Boolean(state) && state !== "unknown" && state !== "unavailable" && state !== "none";
   }
 
   protected override render(): TemplateResult | typeof nothing {
@@ -135,13 +222,9 @@ export class SwitchboardSilenceTile extends LitElement implements LovelaceCard {
     }
 
     const personState = hass.states[config.person];
-    const silencedEntityId = `binary_sensor.${objectId}_silenced`;
-    const snoozesEntityId = `sensor.${objectId}_active_snoozes`;
-    const lastNotificationEntityId = `sensor.${objectId}_last_notification`;
-
-    const silencedState = hass.states[silencedEntityId];
-    const snoozesState = hass.states[snoozesEntityId];
-    const lastNotificationState = hass.states[lastNotificationEntityId];
+    const silencedState = hass.states[`binary_sensor.${objectId}_silenced`];
+    const snoozesState = hass.states[`sensor.${objectId}_active_snoozes`];
+    const lastNotificationState = hass.states[`sensor.${objectId}_last_notification`];
 
     const headerName = personState?.attributes.friendly_name ?? config.person;
     const headerIcon = personState?.attributes.icon ?? "mdi:account";
@@ -167,44 +250,58 @@ export class SwitchboardSilenceTile extends LitElement implements LovelaceCard {
     `;
   }
 
-  private _renderSilencedStatus(
-    silencedState: HomeAssistant["states"][string] | undefined,
-  ): TemplateResult {
+  private _renderSilencedStatus(silencedState: HassEntity | undefined): TemplateResult {
     const hass = this.hass;
     let text: string;
     let chipClass: string;
-    if (!silencedState) {
+    let icon: string;
+    if (
+      !silencedState ||
+      silencedState.state === "unknown" ||
+      silencedState.state === "unavailable"
+    ) {
       text = t(hass, "silence.state.unknown");
       chipClass = "chip-neutral";
+      icon = "mdi:help-circle-outline";
     } else if (silencedState.state === "on") {
       text = t(hass, "silence.state.silenced");
       chipClass = "chip-active";
+      icon = "mdi:bell-off";
     } else {
       text = t(hass, "silence.state.not_silenced");
       chipClass = "chip-acknowledged";
+      icon = "mdi:bell-ring";
     }
     return html`
       <div class="status-row">
-        <span class="chip ${chipClass}">${text}</span>
+        <span class="chip ${chipClass}">
+          <ha-icon icon=${icon} aria-hidden="true"></ha-icon>${text}
+        </span>
       </div>
     `;
   }
 
-  private _renderSnoozes(
-    snoozesState: HomeAssistant["states"][string] | undefined,
-  ): TemplateResult {
+  /**
+   * `unavailable` / `unknown` (and a missing sensor) mean "we do not know",
+   * which is not the same claim as "no snoozes" — `Number("unknown")` is
+   * `NaN`, and reporting that as zero would be a lie.
+   */
+  private _renderSnoozes(snoozesState: HassEntity | undefined): TemplateResult {
     const hass = this.hass;
-    const count = snoozesState ? Number(snoozesState.state) : 0;
+    const raw = snoozesState?.state;
+    if (raw === undefined || raw === "unknown" || raw === "unavailable") {
+      return html`<div class="detail wrap-text">${t(hass, "silence.snoozes.unknown")}</div>`;
+    }
+    const count = Number(raw);
+    if (!Number.isFinite(count)) {
+      return html`<div class="detail wrap-text">${t(hass, "silence.snoozes.unknown")}</div>`;
+    }
     const text =
-      Number.isFinite(count) && count > 0
-        ? t(hass, "silence.snoozes.count", { count })
-        : t(hass, "silence.snoozes.none");
+      count > 0 ? t(hass, "silence.snoozes.count", { count }) : t(hass, "silence.snoozes.none");
     return html`<div class="detail wrap-text">${text}</div>`;
   }
 
-  private _renderLastNotification(
-    lastNotificationState: HomeAssistant["states"][string] | undefined,
-  ): TemplateResult {
+  private _renderLastNotification(lastNotificationState: HassEntity | undefined): TemplateResult {
     const hass = this.hass;
     const state = lastNotificationState?.state;
     if (!state || state === "unknown" || state === "unavailable" || state === "none") {
@@ -229,44 +326,65 @@ export class SwitchboardSilenceTile extends LitElement implements LovelaceCard {
 
     const canSilence = hasRouterService(hass, "silence");
     const canUnsnooze = hasRouterService(hass, "unsnooze");
-    const canClear = canSilence || canUnsnooze;
+    const canUnsilence = hasRouterService(hass, "unsilence");
     const wakeTime = config.wake_time ?? DEFAULT_WAKE_TIME;
-    const wakeMinutes = minutesUntilWakeTime(wakeTime);
-    const tooltip = t(hass, "silence.service_unavailable");
+    const wakeMinutes = minutesUntilWakeTime(wakeTime, new Date(), hass.config?.time_zone);
+    const explanation = t(hass, "silence.service_unavailable");
+    const anyMissing = !canSilence || !canUnsnooze || !canUnsilence;
 
     return html`
       <div class="actions">
-        <button
-          class="action-button touch-target"
-          type="button"
-          aria-label="${t(hass, "silence.action.silence_1h")}"
-          title=${canSilence ? nothing : tooltip}
-          ?disabled=${!canSilence}
-          @click=${() => this._silence(60)}
-        >
-          ${t(hass, "silence.action.silence_1h")}
-        </button>
-        <button
-          class="action-button touch-target"
-          type="button"
-          aria-label="${t(hass, "silence.action.until_wake")}"
-          title=${canSilence && wakeMinutes !== null ? nothing : tooltip}
-          ?disabled=${!canSilence || wakeMinutes === null}
-          @click=${() => wakeMinutes !== null && this._silence(wakeMinutes)}
-        >
-          ${t(hass, "silence.action.until_wake")}
-        </button>
-        <button
-          class="action-button touch-target"
-          type="button"
-          aria-label="${t(hass, "silence.action.clear")}"
-          title=${canClear ? nothing : tooltip}
-          ?disabled=${!canClear}
-          @click=${() => this._clear()}
-        >
-          ${t(hass, "silence.action.clear")}
-        </button>
+        ${this._renderAction(t(hass, "silence.action.silence_1h"), canSilence, explanation, () =>
+          this._silence(60),
+        )}
+        ${this._renderAction(
+          t(hass, "silence.action.until_wake"),
+          canSilence && wakeMinutes !== null,
+          explanation,
+          () => wakeMinutes !== null && this._silence(wakeMinutes),
+        )}
+        ${this._renderAction(
+          t(hass, "silence.action.clear_snoozes"),
+          canUnsnooze,
+          explanation,
+          () => this._clearSnoozes(),
+        )}
+        ${this._renderAction(t(hass, "silence.action.clear"), canUnsilence, explanation, () =>
+          this._unsilence(),
+        )}
       </div>
+      ${
+        anyMissing
+          ? html`<p id="switchboard-service-hint" class="hint wrap-text">${explanation}</p>`
+          : nothing
+      }
+    `;
+  }
+
+  /**
+   * `aria-disabled` rather than `disabled`: the control keeps its place in
+   * the tab order so a keyboard or screen-reader user can reach it and
+   * hear the reason, and the click handler simply does nothing.
+   */
+  private _renderAction(
+    label: string,
+    enabled: boolean,
+    explanation: string,
+    action: () => void,
+  ): TemplateResult {
+    return html`
+      <button
+        class="action-button touch-target"
+        type="button"
+        aria-disabled=${enabled ? "false" : "true"}
+        aria-describedby=${enabled ? nothing : "switchboard-service-hint"}
+        title=${enabled ? nothing : explanation}
+        @click=${() => {
+          if (enabled) action();
+        }}
+      >
+        ${label}
+      </button>
     `;
   }
 
@@ -277,16 +395,23 @@ export class SwitchboardSilenceTile extends LitElement implements LovelaceCard {
     await hass.callService(SWITCHBOARD_DOMAIN, "silence", { person, minutes });
   }
 
-  private async _clear(): Promise<void> {
+  private async _clearSnoozes(): Promise<void> {
     const hass = this.hass;
     const person = this._config?.person;
-    if (!hass || !person) return;
-    if (hasRouterService(hass, "unsnooze")) {
-      await hass.callService(SWITCHBOARD_DOMAIN, "unsnooze", { person });
-    }
-    if (hasRouterService(hass, "silence")) {
-      await hass.callService(SWITCHBOARD_DOMAIN, "silence", { person, minutes: 0 });
-    }
+    if (!hass || !person || !hasRouterService(hass, "unsnooze")) return;
+    await hass.callService(SWITCHBOARD_DOMAIN, "unsnooze", { person });
+  }
+
+  /**
+   * Lifting a silence is its own 0.2.0 service. It is *not* expressible as
+   * `silence(minutes: 0)` — that call is not in the router's contract and
+   * was previously being invented by this card.
+   */
+  private async _unsilence(): Promise<void> {
+    const hass = this.hass;
+    const person = this._config?.person;
+    if (!hass || !person || !hasRouterService(hass, "unsilence")) return;
+    await hass.callService(SWITCHBOARD_DOMAIN, "unsilence", { person });
   }
 }
 

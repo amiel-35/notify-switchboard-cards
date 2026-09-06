@@ -1,8 +1,8 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import "../src/cards/silence-tile/switchboard-silence-tile";
 import type { SwitchboardSilenceTile } from "../src/cards/silence-tile/switchboard-silence-tile";
 import type { SwitchboardSilenceTileConfig } from "../src/types";
-import { createFakeHass, fakeEntity } from "./fake-hass";
+import { createFakeHass, fakeEntity, withUpdatedStates } from "./fake-hass";
 
 async function mountTile(
   config: SwitchboardSilenceTileConfig,
@@ -76,6 +76,37 @@ describe("switchboard-silence-tile states", () => {
     expect(text).toContain("Not silenced");
     expect(text).toContain("No active snoozes");
   });
+
+  for (const state of ["unavailable", "unknown"] as const) {
+    it(`reports an ${state} snooze sensor as unknown, not as "no snoozes"`, async () => {
+      const hass = createFakeHass({
+        states: [
+          fakeEntity("person.alice", "home"),
+          fakeEntity("sensor.alice_active_snoozes", state),
+        ],
+      });
+      const tile = await mountTile(
+        { type: "custom:switchboard-silence-tile", person: "person.alice" },
+        hass,
+      );
+      tiles.push(tile);
+
+      const text = tile.shadowRoot?.textContent ?? "";
+      expect(text).toContain("Active snoozes: —");
+      expect(text).not.toContain("No active snoozes");
+    });
+  }
+
+  it("reports a missing snooze sensor as unknown too", async () => {
+    const hass = createFakeHass({ states: [fakeEntity("person.alice", "home")] });
+    const tile = await mountTile(
+      { type: "custom:switchboard-silence-tile", person: "person.alice" },
+      hass,
+    );
+    tiles.push(tile);
+
+    expect(tile.shadowRoot?.textContent).toContain("Active snoozes: —");
+  });
 });
 
 describe("switchboard-silence-tile router service availability", () => {
@@ -86,7 +117,7 @@ describe("switchboard-silence-tile router service availability", () => {
     tiles = [];
   });
 
-  it("disables silence/clear actions when the router does not yet expose them (0.1.x)", async () => {
+  it("marks actions aria-disabled (still focusable) and explains why on 0.1.x", async () => {
     const hass = createFakeHass({
       states: [fakeEntity("person.alice", "home")],
       services: {},
@@ -97,15 +128,41 @@ describe("switchboard-silence-tile router service availability", () => {
     );
     tiles.push(tile);
 
-    expect(buttonWithText(tile, "Silence 1 h")?.disabled).toBe(true);
-    expect(buttonWithText(tile, "Until wake")?.disabled).toBe(true);
-    expect(buttonWithText(tile, "Clear")?.disabled).toBe(true);
+    for (const label of ["Silence 1 h", "Until wake", "Clear snoozes", "Lift silence"]) {
+      const button = buttonWithText(tile, label);
+      expect(button, label).toBeDefined();
+      expect(button?.getAttribute("aria-disabled"), label).toBe("true");
+      // aria-disabled, not disabled: the control stays reachable.
+      expect(button?.disabled, label).toBe(false);
+    }
+
+    const hint = tile.shadowRoot?.querySelector(".hint");
+    expect(hint?.textContent).toContain("Requires Notify Switchboard ≥ 0.2.0");
+    expect(buttonWithText(tile, "Silence 1 h")?.getAttribute("aria-describedby")).toBe(hint?.id);
+  });
+
+  it("does nothing when an aria-disabled action is clicked", async () => {
+    const hass = createFakeHass({
+      states: [fakeEntity("person.alice", "home")],
+      services: {},
+    });
+    const tile = await mountTile(
+      { type: "custom:switchboard-silence-tile", person: "person.alice" },
+      hass,
+    );
+    tiles.push(tile);
+
+    buttonWithText(tile, "Silence 1 h")?.click();
+    buttonWithText(tile, "Lift silence")?.click();
+    await tile.updateComplete;
+
+    expect(hass.callService).not.toHaveBeenCalled();
   });
 
   it("enables silence actions and calls notify_switchboard.silence once available (0.2.0+)", async () => {
     const hass = createFakeHass({
       states: [fakeEntity("person.alice", "home")],
-      services: { notify_switchboard: { silence: {}, unsnooze: {} } },
+      services: { notify_switchboard: { silence: {}, unsnooze: {}, unsilence: {} } },
     });
     const tile = await mountTile(
       { type: "custom:switchboard-silence-tile", person: "person.alice", wake_time: "07:00" },
@@ -114,7 +171,7 @@ describe("switchboard-silence-tile router service availability", () => {
     tiles.push(tile);
 
     const silenceButton = buttonWithText(tile, "Silence 1 h");
-    expect(silenceButton?.disabled).toBe(false);
+    expect(silenceButton?.getAttribute("aria-disabled")).toBe("false");
     silenceButton?.click();
     await tile.updateComplete;
 
@@ -122,12 +179,14 @@ describe("switchboard-silence-tile router service availability", () => {
       person: "person.alice",
       minutes: 60,
     });
+    // Every service is present: no "requires 0.2.0" hint.
+    expect(tile.shadowRoot?.querySelector(".hint")).toBeNull();
   });
 
-  it("clears by calling unsnooze and silence(0) when both services exist", async () => {
+  it("clears snoozes with unsnooze and never invents silence(minutes: 0)", async () => {
     const hass = createFakeHass({
       states: [fakeEntity("person.alice", "home")],
-      services: { notify_switchboard: { silence: {}, unsnooze: {} } },
+      services: { notify_switchboard: { silence: {}, unsnooze: {}, unsilence: {} } },
     });
     const tile = await mountTile(
       { type: "custom:switchboard-silence-tile", person: "person.alice" },
@@ -135,15 +194,84 @@ describe("switchboard-silence-tile router service availability", () => {
     );
     tiles.push(tile);
 
-    buttonWithText(tile, "Clear")?.click();
+    buttonWithText(tile, "Clear snoozes")?.click();
     await tile.updateComplete;
 
     expect(hass.callService).toHaveBeenCalledWith("notify_switchboard", "unsnooze", {
       person: "person.alice",
     });
-    expect(hass.callService).toHaveBeenCalledWith("notify_switchboard", "silence", {
+    expect(hass.callService).toHaveBeenCalledTimes(1);
+    expect(hass.callService).not.toHaveBeenCalledWith("notify_switchboard", "silence", {
       person: "person.alice",
       minutes: 0,
     });
+  });
+
+  it("lifts a silence with the dedicated unsilence service", async () => {
+    const hass = createFakeHass({
+      states: [fakeEntity("person.alice", "home")],
+      services: { notify_switchboard: { silence: {}, unsnooze: {}, unsilence: {} } },
+    });
+    const tile = await mountTile(
+      { type: "custom:switchboard-silence-tile", person: "person.alice" },
+      hass,
+    );
+    tiles.push(tile);
+
+    buttonWithText(tile, "Lift silence")?.click();
+    await tile.updateComplete;
+
+    expect(hass.callService).toHaveBeenCalledWith("notify_switchboard", "unsilence", {
+      person: "person.alice",
+    });
+  });
+
+  it("keeps 'Lift silence' aria-disabled on a router that only has unsnooze", async () => {
+    const hass = createFakeHass({
+      states: [fakeEntity("person.alice", "home")],
+      services: { notify_switchboard: { unsnooze: {} } },
+    });
+    const tile = await mountTile(
+      { type: "custom:switchboard-silence-tile", person: "person.alice" },
+      hass,
+    );
+    tiles.push(tile);
+
+    expect(buttonWithText(tile, "Clear snoozes")?.getAttribute("aria-disabled")).toBe("false");
+    expect(buttonWithText(tile, "Lift silence")?.getAttribute("aria-disabled")).toBe("true");
+  });
+});
+
+describe("switchboard-silence-tile shouldUpdate", () => {
+  let tiles: SwitchboardSilenceTile[] = [];
+
+  afterEach(() => {
+    for (const tile of tiles) tile.remove();
+    tiles = [];
+  });
+
+  it("does not re-render when an unrelated entity changes", async () => {
+    const hass = createFakeHass({
+      states: [
+        fakeEntity("person.alice", "home"),
+        fakeEntity("binary_sensor.alice_silenced", "off"),
+        fakeEntity("sensor.kitchen_humidity", "44"),
+      ],
+    });
+    const tile = await mountTile(
+      { type: "custom:switchboard-silence-tile", person: "person.alice" },
+      hass,
+    );
+    tiles.push(tile);
+
+    const renderSpy = vi.spyOn(tile as unknown as { render: () => unknown }, "render");
+
+    tile.hass = withUpdatedStates(hass, fakeEntity("sensor.kitchen_humidity", "45"));
+    await tile.updateComplete;
+    expect(renderSpy).not.toHaveBeenCalled();
+
+    tile.hass = withUpdatedStates(tile.hass, fakeEntity("binary_sensor.alice_silenced", "on"));
+    await tile.updateComplete;
+    expect(renderSpy).toHaveBeenCalled();
   });
 });
