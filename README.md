@@ -15,6 +15,9 @@ Two cards are included:
   (`binary_sensor.<person>_silenced`, active snoozes, last notification)
   with silence / clear controls.
 
+
+> **Note:** the router services `notify_switchboard.acknowledge`, `snooze`, `unsnooze`, `silence` and `unsilence` are planned for Notify Switchboard 0.2.0 and are **not yet part of the frozen router contract**. Until they ship, the silence tile's buttons stay disabled (with an explanation) and the snooze menu is hidden; acknowledging falls back to `alert.turn_off`.
+
 ## Compatibility
 
 These cards read native `alert.*` entities and the per-person router
