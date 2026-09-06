@@ -97,6 +97,50 @@ describe("switchboard-alerts-card rendering", () => {
     expect(counts).toEqual(["2", "1"]);
   });
 
+  it("hides the badge title by default in compact mode (chips only)", async () => {
+    const hass = createFakeHass({ states: [fakeEntity("alert.leak", "on")] });
+    const card = await mountCard({ type: "custom:switchboard-alerts-card", mode: "compact" }, hass);
+    cards.push(card);
+
+    expect(card.shadowRoot?.querySelector(".badge-title")).toBeNull();
+    expect(card.shadowRoot?.querySelector(".badge-chips")).not.toBeNull();
+  });
+
+  it("shows the badge title, laid out to never wrap, when title is configured in compact mode", async () => {
+    const hass = createFakeHass({ states: [fakeEntity("alert.leak", "on")] });
+    const card = await mountCard(
+      { type: "custom:switchboard-alerts-card", mode: "compact", title: "Alertes" },
+      hass,
+    );
+    cards.push(card);
+
+    const titleEl = card.shadowRoot?.querySelector(".badge-title");
+    expect(titleEl?.textContent?.trim()).toBe("Alertes");
+
+    // The title must be styled to never wrap mid-word: nowrap + ellipsis,
+    // never `wrap-text` (white-space: normal), which is what let a narrow
+    // sections column break it letter by letter ("Al / ert / es").
+    expect(titleEl?.classList.contains("wrap-text")).toBe(false);
+    const styleText = Array.from(card.shadowRoot?.querySelectorAll("style") ?? [])
+      .map((style) => style.textContent ?? "")
+      .join("\n");
+    expect(styleText).toMatch(/\.badge-title\s*{[^}]*white-space:\s*nowrap/);
+    expect(styleText).toMatch(/\.badge-title\s*{[^}]*text-overflow:\s*ellipsis/);
+  });
+
+  it("declares compact grid options wide enough that sections never give it a single column", async () => {
+    const hass = createFakeHass({ states: [fakeEntity("alert.leak", "on")] });
+    const card = await mountCard({ type: "custom:switchboard-alerts-card", mode: "compact" }, hass);
+    cards.push(card);
+
+    expect(card.getGridOptions()).toEqual({
+      rows: 1,
+      columns: 4,
+      min_rows: 1,
+      min_columns: 3,
+    });
+  });
+
   it("opens a dialog listing alerts when the compact badge is activated", async () => {
     const hass = createFakeHass({
       states: [fakeEntity("alert.leak", "on", { attributes: { friendly_name: "Leak" } })],

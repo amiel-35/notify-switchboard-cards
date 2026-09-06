@@ -96,7 +96,13 @@ person: person.alice # optional
   entity in Home Assistant when omitted.
 - `mode` — `full` renders the list inline; `compact` renders a badge with
   the active/acknowledged/unavailable counts that opens a dialog on
-  activation.
+  activation. In compact mode the badge shows **chips only** by default —
+  `title` is not rendered on the badge itself unless explicitly
+  configured, since a narrow sections column rarely has room for both a
+  title and the count chips. When `title` is set, it is shown as a
+  single, non-wrapping line (ellipsized if the column is too narrow) so
+  it can never wrap letter by letter; the dialog opened from the badge
+  always shows the title regardless of this setting.
 - `show_acknowledged` — whether acknowledged (`off`-state) alerts are
   listed alongside active ones. Idle alerts are never listed; unavailable
   ones always are.

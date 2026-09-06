@@ -63,10 +63,11 @@ export class SwitchboardAlertsCard extends LitElement implements LovelaceCard {
     sharedStyles,
     css`
       .badge {
-        display: flex;
+        display: inline-flex;
         align-items: center;
         gap: 8px;
         width: 100%;
+        min-width: 0;
         padding: 8px 16px;
         background: transparent;
         border: none;
@@ -74,13 +75,40 @@ export class SwitchboardAlertsCard extends LitElement implements LovelaceCard {
         text-align: start;
       }
 
+      /*
+       * Title never wraps mid-word: a narrow sections column would
+       * otherwise break it letter by letter ("Al / ert / es"). It gets a
+       * fixed flex-basis of 0 so — unlike the chips — it contributes no
+       * width to the shrink calculation and is the last thing to give up
+       * space; ellipsis only kicks in once .badge-chips has already
+       * shrunk to its own floor.
+       */
       .badge-title {
-        flex: 1;
+        flex: 1 1 0;
+        min-width: 24px;
         font-weight: 500;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      /*
+       * Chips keep a real flex-basis (their natural content width), so
+       * negative (shrinking) space is taken from them before it ever
+       * touches the title.
+       */
+      .badge-chips {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        flex: 0 1 auto;
+        min-width: 0;
+        overflow: hidden;
       }
 
       .badge-count {
         justify-content: center;
+        flex-shrink: 0;
       }
 
       .dialog-backdrop {
@@ -299,10 +327,16 @@ export class SwitchboardAlertsCard extends LitElement implements LovelaceCard {
     return Math.max(1, this._rows().length + 1);
   }
 
-  /** Sizing hints for the sections layout. */
+  /**
+   * Sizing hints for the sections layout. The compact badge needs at
+   * least 3 columns' worth of width for its title (when configured) and
+   * chips to sit on one line without the sections view squeezing it down
+   * to a single narrow column, which is what caused the title to wrap
+   * letter by letter.
+   */
   getGridOptions(): LovelaceGridOptions {
     if (this._config?.mode === "compact") {
-      return { rows: 1, columns: 3, min_rows: 1, min_columns: 2 };
+      return { rows: 1, columns: 4, min_rows: 1, min_columns: 3 };
     }
     return { rows: "auto", columns: 12, min_rows: 2, min_columns: 6 };
   }
@@ -440,6 +474,10 @@ export class SwitchboardAlertsCard extends LitElement implements LovelaceCard {
   private _renderBadge(rows: AlertRow[], title: string): TemplateResult {
     const { active, acknowledged, unavailable } = this._counts(rows);
     const label = t(this.hass, "alerts.badge.label", { active, acknowledged, unavailable });
+    // The compact badge defaults to chips only: a title is only added back
+    // once `title` is explicitly configured, since that is the one piece
+    // of text a narrow sections column cannot always give enough room to.
+    const showTitle = Boolean(this._config?.title);
     return html`
       <ha-card>
         <button
@@ -450,33 +488,35 @@ export class SwitchboardAlertsCard extends LitElement implements LovelaceCard {
           aria-label="${title}: ${label}"
           @click=${this._openDialog}
         >
-          <span class="badge-title wrap-text">${title}</span>
-          ${this._renderBadgeChip(
-            active,
-            active > 0 ? "chip-active" : "chip-neutral",
-            "mdi:bell-ring",
-            t(this.hass, "alerts.badge.active", { count: active }),
-          )}
-          ${
-            acknowledged > 0
-              ? this._renderBadgeChip(
-                  acknowledged,
-                  "chip-acknowledged",
-                  "mdi:check",
-                  t(this.hass, "alerts.badge.acknowledged", { count: acknowledged }),
-                )
-              : nothing
-          }
-          ${
-            unavailable > 0
-              ? this._renderBadgeChip(
-                  unavailable,
-                  "chip-unavailable",
-                  "mdi:help-circle-outline",
-                  t(this.hass, "alerts.badge.unavailable", { count: unavailable }),
-                )
-              : nothing
-          }
+          ${showTitle ? html`<span class="badge-title" title=${title}>${title}</span>` : nothing}
+          <span class="badge-chips">
+            ${this._renderBadgeChip(
+              active,
+              active > 0 ? "chip-active" : "chip-neutral",
+              "mdi:bell-ring",
+              t(this.hass, "alerts.badge.active", { count: active }),
+            )}
+            ${
+              acknowledged > 0
+                ? this._renderBadgeChip(
+                    acknowledged,
+                    "chip-acknowledged",
+                    "mdi:check",
+                    t(this.hass, "alerts.badge.acknowledged", { count: acknowledged }),
+                  )
+                : nothing
+            }
+            ${
+              unavailable > 0
+                ? this._renderBadgeChip(
+                    unavailable,
+                    "chip-unavailable",
+                    "mdi:help-circle-outline",
+                    t(this.hass, "alerts.badge.unavailable", { count: unavailable }),
+                  )
+                : nothing
+            }
+          </span>
         </button>
       </ha-card>
     `;

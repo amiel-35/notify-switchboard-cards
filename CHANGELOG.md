@@ -5,6 +5,19 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] - 2026-09-07
+
+### Fixed
+
+- `switchboard-alerts-card` compact badge: the title no longer wraps
+  letter by letter in a narrow sections column (e.g. "Al / ert / es").
+  The compact badge now shows chips only by default — `title` is only
+  rendered on the badge once explicitly configured, and when it is, it is
+  laid out to never wrap (`white-space: nowrap` + ellipsis, with chips
+  shrinking first). `getGridOptions()` for compact mode now declares
+  `min_columns: 3` / `columns: 4` so the sections view has less room to
+  squeeze it down to a single column in the first place. (#1)
+
 ## [0.1.0] - 2026-09-07
 
 ### Added
