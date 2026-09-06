@@ -15,6 +15,19 @@ Two cards are included:
   (`binary_sensor.<person>_silenced`, active snoozes, last notification)
   with silence / clear controls.
 
+## Screenshots
+
+| | |
+|---|---|
+| ![switchboard-alerts-card in full mode, showing one active alert with Acknowledge and Snooze buttons](docs/screenshots/alerts-card-full.png) | `switchboard-alerts-card`, `mode: full`, with one active alert |
+| ![switchboard-alerts-card in compact mode, a small badge showing an active-alert count](docs/screenshots/alerts-card-compact.png) | `switchboard-alerts-card`, `mode: compact` |
+| ![switchboard-silence-tile for a person who is not silenced](docs/screenshots/silence-tile.png) | `switchboard-silence-tile` for a person with no active silence |
+| ![Both cards together on a Lovelace dashboard, light theme](docs/screenshots/dashboard.png) | Full dashboard — light theme |
+| ![Same dashboard in dark theme](docs/screenshots/dashboard-dark.png) | Full dashboard — dark theme |
+| ![Same dashboard at a 480px mobile viewport](docs/screenshots/dashboard-mobile.png) | Full dashboard — mobile viewport (480px) |
+
+Captured against a real Home Assistant 2026.9 instance with
+`scripts/screenshots.mjs` (see [CONTRIBUTING.md](CONTRIBUTING.md)).
 
 > **Note:** the router services `notify_switchboard.acknowledge`, `snooze`, `unsnooze`, `silence` and `unsilence` are planned for Notify Switchboard 0.2.0 and are **not yet part of the frozen router contract**. Until they ship, the silence tile's buttons stay disabled (with an explanation) and the snooze menu is hidden; acknowledging falls back to `alert.turn_off`.
 
