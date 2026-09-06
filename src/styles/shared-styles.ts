@@ -3,16 +3,19 @@ import { css } from "lit";
 /**
  * Shared visual rules for both cards and their editors:
  * - only theme CSS variables are used for color, never hardcoded hex;
+ * - the host is transparent: `ha-card` paints the surface, so the card
+ *   inherits whatever background the active theme gives it;
  * - every interactive control keeps a >=48px touch target;
  * - focus is always visible (never `outline: none` without a replacement);
  * - text wraps instead of truncating, even at 200% zoom;
+ * - a control that cannot act is `aria-disabled`, not `disabled`, so it
+ *   stays reachable by keyboard and screen readers can announce why;
  * - motion is skipped for users who asked for it.
  */
 export const sharedStyles = css`
   :host {
     display: block;
     color: var(--primary-text-color);
-    background: var(--card-background-color, var(--ha-card-background));
   }
 
   * {
@@ -32,6 +35,7 @@ export const sharedStyles = css`
 
   button:focus-visible,
   [tabindex]:focus-visible,
+  summary:focus-visible,
   a:focus-visible {
     outline: 2px solid var(--primary-color, #03a9f4);
     outline-offset: 2px;
@@ -54,6 +58,12 @@ export const sharedStyles = css`
     border: 1px solid currentColor;
   }
 
+  .chip ha-icon {
+    --mdc-icon-size: 16px;
+    width: 16px;
+    height: 16px;
+  }
+
   .chip.chip-active {
     color: var(--error-color, #db4437);
   }
@@ -66,10 +76,20 @@ export const sharedStyles = css`
     color: var(--secondary-text-color);
   }
 
+  .chip.chip-unavailable {
+    color: var(--warning-color, var(--secondary-text-color));
+  }
+
   .empty-state {
     padding: 16px;
     text-align: center;
     color: var(--secondary-text-color);
+  }
+
+  .hint {
+    margin: 0;
+    color: var(--secondary-text-color);
+    font-size: 0.8125rem;
   }
 
   .action-button {
@@ -84,14 +104,15 @@ export const sharedStyles = css`
     overflow-wrap: anywhere;
   }
 
+  .action-button[aria-disabled="true"],
   .action-button:disabled {
     cursor: not-allowed;
     opacity: 0.5;
   }
 
-  .action-button:hover:not(:disabled) {
+  .action-button:hover:not(:disabled):not([aria-disabled="true"]) {
     background: var(--primary-color, rgba(3, 169, 244, 0.1));
-    color: var(--text-primary-color, inherit);
+    color: var(--text-primary-color, #fff);
   }
 
   @media (prefers-reduced-motion: reduce) {
