@@ -141,9 +141,6 @@ and Escape closes it and returns focus to the badge button. Controls that
 cannot act (because the router service is missing) are `aria-disabled`
 rather than `disabled`, so they stay reachable and the reason is announced.
 
-## Screenshots
-
-_Add screenshots here once the cards are running against a live dashboard._
 
 ## Development
 

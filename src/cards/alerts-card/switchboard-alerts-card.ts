@@ -597,7 +597,7 @@ export class SwitchboardAlertsCard extends LitElement implements LovelaceCard {
   }
 
   /**
-   * "Today: routed / dropped" line, read from the router's own entities
+   * "Dropped today / last delivery" footer (routed_today is not shown yet), read from the router's own entities
    * (`sensor.switchboard_dropped_today`, `event.switchboard_delivery`).
    * Rendered only when those entities actually exist, so the card stays
    * correct against a router that does not publish them.
