@@ -34,9 +34,15 @@ export interface HassLocale {
 /** A Home Assistant service, keyed by domain then service name. */
 export type HassServices = Record<string, Record<string, unknown>>;
 
+export interface HassConfig {
+  /** IANA zone, e.g. "Europe/Paris". The instance's own clock. */
+  time_zone?: string;
+}
+
 export interface HomeAssistant {
   states: Record<string, HassEntity>;
   services: HassServices;
+  config?: HassConfig;
   locale?: HassLocale;
   /** Older frontends only expose a flat language code. */
   language?: string;
@@ -55,12 +61,43 @@ export interface LovelaceCardConfig {
   [key: string]: unknown;
 }
 
+/**
+ * Sizing hints for the sections (grid) layout. `rows: "auto"` lets the card
+ * size itself to its content; `min_*` are the smallest usable dimensions the
+ * user is allowed to drag down to.
+ */
+export interface LovelaceGridOptions {
+  rows?: number | "auto";
+  columns?: number | "full";
+  min_rows?: number;
+  max_rows?: number;
+  min_columns?: number;
+  max_columns?: number;
+}
+
 export interface LovelaceCard extends HTMLElement {
   hass?: HomeAssistant;
   isPanel?: boolean;
   editMode?: boolean;
   getCardSize: () => number | Promise<number>;
+  getGridOptions?: () => LovelaceGridOptions;
   setConfig: (config: LovelaceCardConfig) => void;
+}
+
+/**
+ * The subset of `ha-form`'s schema we use. `ha-form` and `ha-selector` are
+ * runtime globals registered by the Home Assistant frontend — they are
+ * never imported, only referenced from a template (and feature-detected
+ * with `customElements.get("ha-form")` so the editor degrades outside HA).
+ */
+export interface HaFormSchemaEntry {
+  name: string;
+  required?: boolean;
+  selector: Record<string, unknown>;
+}
+
+export interface HaFormValueChangedDetail {
+  value: Record<string, unknown>;
 }
 
 export interface LovelaceCardEditor extends HTMLElement {
