@@ -3,6 +3,7 @@ import "./cards/alerts-card/switchboard-alerts-card-editor";
 import "./cards/silence-tile/switchboard-silence-tile";
 import "./cards/silence-tile/switchboard-silence-tile-editor";
 import type { CustomCardEntry } from "./ha-types";
+import { CARD_VERSION } from "./version";
 
 const CARDS: CustomCardEntry[] = [
   {
@@ -24,6 +25,14 @@ const CARDS: CustomCardEntry[] = [
 
 window.customCards = window.customCards || [];
 window.customCards.push(...CARDS);
+
+// Version banner, so an issue report can state which build is loaded
+// without digging through HACS.
+console.info(
+  `%c NOTIFY-SWITCHBOARD-CARDS %c ${CARD_VERSION} `,
+  "color: white; background: #03a9f4; font-weight: 700;",
+  "color: #03a9f4; background: white; font-weight: 700;",
+);
 
 export { SwitchboardAlertsCard } from "./cards/alerts-card/switchboard-alerts-card";
 export { SwitchboardAlertsCardEditor } from "./cards/alerts-card/switchboard-alerts-card-editor";

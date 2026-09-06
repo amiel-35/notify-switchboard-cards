@@ -40,5 +40,9 @@ jobs:
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/notify-switchboard-cards.js
+          # The bundle ships with a sourcemap comment; attach the map too so
+          # a stack trace from a user's browser stays readable.
+          files: |
+            dist/notify-switchboard-cards.js
+            dist/notify-switchboard-cards.js.map
           generate_release_notes: true
