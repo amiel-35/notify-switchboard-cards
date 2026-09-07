@@ -5,6 +5,18 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Documentation
+
+- README: added a "Router version matrix" mapping each Notify Switchboard
+  router version (0.1–0.5) to what these cards show or do, and dropped the
+  stale "planned for Notify Switchboard 0.2.0" / "not yet part of the
+  frozen router contract" wording now that those services and entities
+  have shipped. Clarified that `target_map`, `snooze_minutes` and
+  `wake_time` stay required in the card config until router 0.7.0 ships
+  `sensor.switchboard_routing_table`.
+
 ## [0.1.1] - 2026-09-07
 
 ### Fixed
