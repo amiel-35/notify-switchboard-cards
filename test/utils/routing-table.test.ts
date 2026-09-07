@@ -94,7 +94,15 @@ describe("readRoutingTable", () => {
       states: [
         routingTableEntity({
           targets: [{ slug: "" }, "leak", null, { slug: "ok", snooze_minutes: [15, "60", 0, -5] }],
-          persons: [{ entity_id: "alice" }, { wake_time: "07:00:00" }, { entity_id: "person.ok" }],
+          persons: [
+            { entity_id: "alice" },
+            { wake_time: "07:00:00" },
+            // A person is a `person.*` and nothing else: the picker sends
+            // this id straight to `notify_switchboard.snooze`.
+            { entity_id: "sensor.alice" },
+            { entity_id: "person." },
+            { entity_id: "person.ok" },
+          ],
         }),
       ],
     });
@@ -170,5 +178,43 @@ describe("personChoices", () => {
 
   it("returns an empty list without a routing table", () => {
     expect(personChoices(undefined, createFakeHass())).toEqual([]);
+  });
+
+  it("offers only the persons of the audience it is given", () => {
+    const hass = createFakeHass({
+      states: [
+        routingTableEntity({ targets: TARGETS, persons: PERSONS }),
+        fakeEntity("person.alice", "home", { attributes: { friendly_name: "Alice" } }),
+      ],
+    });
+    const table = readRoutingTable(hass);
+    // `leak`'s audience: Alice and a bare `notify.*` output, which is not
+    // a person and can never be snoozed for.
+    expect(personChoices(table, hass, TARGETS[0]!.audience)).toEqual([
+      { entityId: "person.alice", name: "Alice" },
+    ]);
+    expect(personChoices(table, hass, TARGETS[1]!.audience)).toEqual([
+      { entityId: "person.bob", name: "person.bob" },
+    ]);
+  });
+
+  it("offers nobody for an audience made only of bare outputs", () => {
+    const hass = createFakeHass({
+      states: [routingTableEntity({ targets: TARGETS, persons: PERSONS })],
+    });
+    expect(personChoices(readRoutingTable(hass), hass, ["notify.hallway_speaker"])).toEqual([]);
+    expect(personChoices(readRoutingTable(hass), hass, [])).toEqual([]);
+  });
+
+  it("offers every known person when no audience is known at all", () => {
+    // No routing-table row for this target (a `target_map` pointing at a
+    // slug the table does not carry): the card cannot narrow the list.
+    const hass = createFakeHass({
+      states: [routingTableEntity({ targets: TARGETS, persons: PERSONS })],
+    });
+    expect(personChoices(readRoutingTable(hass), hass, undefined).map((c) => c.entityId)).toEqual([
+      "person.alice",
+      "person.bob",
+    ]);
   });
 });

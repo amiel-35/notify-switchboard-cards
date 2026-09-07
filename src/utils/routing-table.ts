@@ -95,8 +95,15 @@ function parseTarget(raw: unknown): RoutingTableTarget | undefined {
   };
 }
 
+/** A person is a `person.*` and nothing else — the picker sends this id to the router. */
+const PERSON_ENTITY_RE = /^person\.[a-z0-9_]+$/;
+
 function parsePerson(raw: unknown): RoutingTablePerson | undefined {
-  if (!isPlainObject(raw) || typeof raw.entity_id !== "string" || !raw.entity_id.includes(".")) {
+  if (
+    !isPlainObject(raw) ||
+    typeof raw.entity_id !== "string" ||
+    !PERSON_ENTITY_RE.test(raw.entity_id)
+  ) {
     return undefined;
   }
   return {
@@ -159,16 +166,36 @@ export function wakeTimeForPerson(
 }
 
 /**
- * The persons the picker offers, named from their `person.*` state when
- * the state machine has one. A person the router knows but the frontend
- * does not is still offered — under its entity id — rather than silently
- * dropped, because the router will happily snooze for it.
+ * The persons the picker may offer for one target, named from their
+ * `person.*` state when the state machine has one. A person the router
+ * knows but the frontend does not is still offered — under its entity id —
+ * rather than silently dropped, because the router will happily snooze
+ * for it.
+ *
+ * `audience` is that target's own audience, and the list is its
+ * intersection with the configured persons: `notify_switchboard.snooze`
+ * refuses a person who is not in the row's audience
+ * (`person_not_in_audience`) and raises a `repairs` issue when a card
+ * keeps asking, so offering one is offering a button that cannot work.
+ * The intersection also drops the audience's bare `notify.*` outputs,
+ * which are not persons and have no snooze at all (contract §"Bare
+ * outputs").
+ *
+ * `undefined` means "no audience is known" — no routing-table row was
+ * derived for this alert — and the whole list is offered, exactly as
+ * before: narrowing on an audience nobody published would hide the picker
+ * rather than protect it.
  */
 export function personChoices(
   table: RoutingTable | undefined,
   hass: HomeAssistant | undefined,
+  audience?: string[] | undefined,
 ): Array<{ entityId: string; name: string }> {
-  return (table?.persons ?? []).map((person) => {
+  const persons =
+    audience === undefined
+      ? (table?.persons ?? [])
+      : (table?.persons ?? []).filter((person) => audience.includes(person.entityId));
+  return persons.map((person) => {
     const stateObj = hass?.states?.[person.entityId];
     const friendlyName = stateObj?.attributes.friendly_name;
     return {

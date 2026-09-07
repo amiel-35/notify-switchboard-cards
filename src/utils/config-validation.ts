@@ -115,9 +115,12 @@ export function validatePositiveIntegerList(
   if (!Array.isArray(value)) {
     fail(card, option, `must be a list of positive whole numbers, not a ${typeof value}`);
   }
-  if (value.length === 0) {
-    fail(card, option, "must contain at least one duration");
-  }
+  /*
+   * An empty list is accepted and means "nothing set here": it is what the
+   * editor emits once every duration is cleared, and since router 0.7.0
+   * that reads as "derive each target's own durations from the routing
+   * table" rather than as a mistake to reject with an error card.
+   */
   for (const item of value) {
     if (typeof item !== "number" || !Number.isInteger(item) || item <= 0) {
       fail(card, option, `must only contain positive whole numbers (got ${JSON.stringify(item)})`);

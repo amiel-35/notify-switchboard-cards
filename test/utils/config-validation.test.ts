@@ -54,13 +54,21 @@ describe("switchboard-alerts-card setConfig validation", () => {
     expect(() => setAlerts({})).not.toThrow();
   });
 
+  /**
+   * An empty list is not a mistake: it is the editor's way of saying
+   * "nothing set here", which since router 0.7.0 means "derive each
+   * target's own durations from the routing table".
+   */
+  it("accepts an empty `snooze_minutes` as 'derive from the router'", () => {
+    expect(() => setAlerts({ snooze_minutes: [] })).not.toThrow();
+  });
+
   it("rejects a `snooze_minutes` that is not a list of positive whole numbers", () => {
     expect(() => setAlerts({ snooze_minutes: 15 })).toThrow(/"snooze_minutes"/);
     expect(() => setAlerts({ snooze_minutes: [15, 0] })).toThrow(/"snooze_minutes"/);
     expect(() => setAlerts({ snooze_minutes: [15, -60] })).toThrow(/"snooze_minutes"/);
     expect(() => setAlerts({ snooze_minutes: [15, 2.5] })).toThrow(/"snooze_minutes"/);
     expect(() => setAlerts({ snooze_minutes: ["15"] })).toThrow(/"snooze_minutes"/);
-    expect(() => setAlerts({ snooze_minutes: [] })).toThrow(/"snooze_minutes"/);
     expect(() => setAlerts({ snooze_minutes: [15, 60, 480] })).not.toThrow();
   });
 

@@ -40,7 +40,7 @@ describe("resolveAlertTarget", () => {
   const table = readRoutingTable(
     createFakeHass({
       states: [
-        fakeEntity(ROUTING_TABLE_ENTITY, "2", {
+        fakeEntity(ROUTING_TABLE_ENTITY, "4", {
           attributes: {
             targets: [
               {
@@ -48,13 +48,31 @@ describe("resolveAlertTarget", () => {
                 alert_entity: "alert.leak_kitchen",
                 snooze_minutes: [10, 30],
                 allow_acknowledge: true,
-                audience: [],
+                audience: ["person.alice"],
               },
               {
                 slug: "doorbell",
                 alert_entity: "alert.doorbell",
                 snooze_minutes: [5],
                 allow_acknowledge: false,
+                audience: ["person.bob"],
+              },
+              {
+                // Snooze is off for this target: the router refuses every
+                // duration, because its list holds none.
+                slug: "silent",
+                alert_entity: "alert.silent",
+                snooze_minutes: [],
+                allow_acknowledge: true,
+                audience: [],
+              },
+              {
+                // `allow_acknowledge: true` but no alert to turn off: the
+                // router's own test is `bool(alert_entity) and allow_acknowledge`.
+                slug: "no_alert",
+                alert_entity: null,
+                snooze_minutes: [20],
+                allow_acknowledge: true,
                 audience: [],
               },
             ],
@@ -101,6 +119,7 @@ describe("resolveAlertTarget", () => {
       source: "none",
       allowAcknowledge: true,
       snoozeMinutes: DEFAULT_SNOOZE_MINUTES,
+      audience: undefined,
     });
     expect(
       resolveAlertTarget(
@@ -113,6 +132,7 @@ describe("resolveAlertTarget", () => {
       source: "config",
       allowAcknowledge: true,
       snoozeMinutes: DEFAULT_SNOOZE_MINUTES,
+      audience: undefined,
     });
   });
 
@@ -120,5 +140,30 @@ describe("resolveAlertTarget", () => {
     expect(resolveAlertTarget("alert.unmapped", {}, table).snoozeMinutes).toEqual(
       DEFAULT_SNOOZE_MINUTES,
     );
+  });
+
+  it("takes an empty snooze_minutes as 'snooze is off', not as 'use the default'", () => {
+    // The router rejects any duration that is not in the row's own list
+    // (`snooze_minutes_not_offered`), so an empty list offers nothing.
+    expect(resolveAlertTarget("alert.silent", {}, table).snoozeMinutes).toEqual([]);
+  });
+
+  it("still lets the card's own durations override an empty router list", () => {
+    expect(
+      resolveAlertTarget("alert.silent", { snoozeMinutes: [45] }, table).snoozeMinutes,
+    ).toEqual([45]);
+  });
+
+  it("refuses acknowledgement for a row with no alert entity, whatever it allows", () => {
+    expect(
+      resolveAlertTarget("alert.no_alert", { targetMap: { "alert.no_alert": "no_alert" } }, table)
+        .allowAcknowledge,
+    ).toBe(false);
+  });
+
+  it("reports the row's audience, and nothing when no row was derived", () => {
+    expect(resolveAlertTarget("alert.leak_kitchen", {}, table).audience).toEqual(["person.alice"]);
+    expect(resolveAlertTarget("alert.unmapped", {}, table).audience).toBeUndefined();
+    expect(resolveAlertTarget("alert.leak_kitchen", {}, undefined).audience).toBeUndefined();
   });
 });

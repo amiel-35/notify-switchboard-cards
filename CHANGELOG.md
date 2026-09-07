@@ -39,9 +39,35 @@ older router every 0.1.x behaviour is unchanged.
 
 ### Changed
 
-- A target that the routing table marks `allow_acknowledge: false` is
-  acknowledged with the native `alert.turn_off` instead of
-  `notify_switchboard.acknowledge`, which the router would refuse.
+- A target that the routing table marks `allow_acknowledge: false` — or
+  that carries no `alert_entity` at all, which is the router's own test
+  (`bool(alert_entity) and allow_acknowledge`) — is acknowledged with the
+  native `alert.turn_off` instead of `notify_switchboard.acknowledge`,
+  which the router would refuse.
+- The kiosk person picker offers only the persons of **that target's own
+  audience**. `notify_switchboard.snooze` refuses a person outside the
+  row's audience and raises a `repairs` issue when a card keeps asking, so
+  a name the router would refuse is never offered; an audience whose
+  entries are all bare `notify.*` outputs shows no picker at all.
+- A target the routing table publishes with an empty `snooze_minutes` has
+  snooze switched off — the router accepts no duration for it — and the
+  card now hides its snooze menu instead of falling back to the built-in
+  `[15, 60, 480]`, every one of which would have been refused. The
+  built-in fallback applies only when the routing table holds no row for
+  that alert. **If your card still carries `snooze_minutes: [15, 60, 480]`
+  from the 0.1.x editor, delete the option** to pick up each target's own
+  durations.
+- Picking a snooze duration now closes that row's menu and returns focus
+  to its Snooze button, instead of leaving an open panel offering an
+  action already taken.
+- `snooze_minutes: []` is accepted in the card config and read as "derive
+  from the router" — it is what the editor emits once every duration is
+  cleared — rather than rejected with an error card.
+- "Acknowledged by …" is dropped when the alert has changed since the
+  acknowledgement event: an alert that fired again is a new one nobody has
+  acknowledged yet, and the earlier acknowledger is not credited with it.
+- A routing-table `persons` entry whose `entity_id` is not a `person.*` is
+  dropped as malformed rather than offered in the picker.
 - `snooze_minutes` and `wake_time` are no longer defaulted in
   `setConfig`, and the alerts editor no longer pre-fills the snooze
   durations field. A stored default was indistinguishable from a

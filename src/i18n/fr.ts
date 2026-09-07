@@ -14,6 +14,7 @@ export const fr: Record<TranslationKey, string> = {
   "alerts.action.snooze_minutes_everyone": "Reporter pour tout le monde · {minutes} min",
   "alerts.action.more_info": "Afficher le détail de {name}",
   "alerts.picker.prompt": "Reporter pour qui ?",
+  "alerts.picker.prompt_for": "Reporter {name} pour qui ?",
   "alerts.picker.everyone": "Tout le monde",
   "alerts.picker.chosen": "Pour : {name}",
   "alerts.picker.change": "Changer",

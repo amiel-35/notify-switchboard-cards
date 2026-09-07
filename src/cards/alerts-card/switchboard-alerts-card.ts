@@ -771,7 +771,14 @@ export class SwitchboardAlertsCard extends LitElement implements LovelaceCard {
     );
     const target = this._resolveTarget(entityId);
     const slug = target.slug;
-    const canSnooze = !isUnavailable && Boolean(slug) && hasRouterService(hass, "snooze");
+    // No duration to offer is no menu: the router refuses any duration
+    // that is not in the target's own `snooze_minutes`, so a row the table
+    // publishes with an empty list has snooze switched off.
+    const canSnooze =
+      !isUnavailable &&
+      Boolean(slug) &&
+      target.snoozeMinutes.length > 0 &&
+      hasRouterService(hass, "snooze");
     const acknowledgedBy =
       kind === "acknowledged" ? acknowledgedByForAlert(hass, entityId, slug) : undefined;
 
@@ -842,7 +849,7 @@ export class SwitchboardAlertsCard extends LitElement implements LovelaceCard {
                     </button>
                   `
           }
-          ${canSnooze ? this._renderSnoozeMenu(slug as string, target.snoozeMinutes) : nothing}
+          ${canSnooze ? this._renderSnoozeMenu(slug as string, target, name) : nothing}
         </div>
       </li>
     `;
@@ -857,9 +864,13 @@ export class SwitchboardAlertsCard extends LitElement implements LovelaceCard {
    * then "how long?" — rather than a second popup, which on a wall
    * tablet would mean a dialog inside a dialog.
    */
-  private _renderSnoozeMenu(slug: string, snoozeMinutes: number[]): TemplateResult {
+  private _renderSnoozeMenu(
+    slug: string,
+    target: ResolvedAlertTarget,
+    name: string,
+  ): TemplateResult {
     const hass = this.hass;
-    const choices = this._personChoices();
+    const choices = this._personChoices(target.audience);
     const picking = choices.length > 0 && this._pickedPersons[slug] === undefined;
 
     return html`
@@ -884,8 +895,8 @@ export class SwitchboardAlertsCard extends LitElement implements LovelaceCard {
           </summary>
           ${
             picking
-              ? this._renderPersonPicker(slug, choices)
-              : this._renderSnoozeDurations(slug, snoozeMinutes, choices.length > 0)
+              ? this._renderPersonPicker(slug, choices, name)
+              : this._renderSnoozeDurations(slug, target, choices.length > 0)
           }
         </details>
       </div>
@@ -896,13 +907,14 @@ export class SwitchboardAlertsCard extends LitElement implements LovelaceCard {
   private _renderPersonPicker(
     slug: string,
     choices: Array<{ entityId: string; name: string }>,
+    name: string,
   ): TemplateResult {
     const hass = this.hass;
     return html`
       <div
         class="picker-step"
         role="group"
-        aria-label=${t(hass, "alerts.picker.prompt")}
+        aria-label=${t(hass, "alerts.picker.prompt_for", { name })}
         data-slug=${slug}
       >
         <span class="picker-prompt wrap-text">${t(hass, "alerts.picker.prompt")}</span>
@@ -931,9 +943,10 @@ export class SwitchboardAlertsCard extends LitElement implements LovelaceCard {
   /** Step 2 (or the only step, without the picker): how long? */
   private _renderSnoozeDurations(
     slug: string,
-    snoozeMinutes: number[],
+    target: ResolvedAlertTarget,
     withPicker: boolean,
   ): TemplateResult {
+    const snoozeMinutes = target.snoozeMinutes;
     const hass = this.hass;
     const person = this._effectivePerson(slug);
     const labelKey = person
@@ -946,7 +959,9 @@ export class SwitchboardAlertsCard extends LitElement implements LovelaceCard {
           ? html`
               <div class="picker-chosen">
                 <span class="wrap-text"
-                  >${t(hass, "alerts.picker.chosen", { name: this._pickedName(slug) })}</span
+                  >${t(hass, "alerts.picker.chosen", {
+                    name: this._pickedName(slug, target.audience),
+                  })}</span
                 >
                 <button
                   class="action-button touch-target picker-change"
@@ -1013,15 +1028,20 @@ export class SwitchboardAlertsCard extends LitElement implements LovelaceCard {
   }
 
   /**
-   * The persons the picker offers. Empty — so the picker never appears —
-   * unless the option is on *and* the routing table actually names
-   * somebody: a chooser with nothing to choose is worse than no chooser.
+   * The persons the picker offers for one target. Empty — so the picker
+   * never appears — unless the option is on *and* the routing table names
+   * somebody **in that target's audience**: a chooser with nothing to
+   * choose is worse than no chooser, and a name the router would refuse
+   * (`person_not_in_audience`) is worse still.
    */
-  private _personChoices(): Array<{ entityId: string; name: string }> {
+  private _personChoices(audience?: string[] | undefined): Array<{
+    entityId: string;
+    name: string;
+  }> {
     if (!this._config?.person_picker) {
       return [];
     }
-    return personChoices(this._routingTable(), this.hass);
+    return personChoices(this._routingTable(), this.hass, audience);
   }
 
   /**
@@ -1037,12 +1057,14 @@ export class SwitchboardAlertsCard extends LitElement implements LovelaceCard {
     return this._config?.person;
   }
 
-  private _pickedName(slug: string): string {
+  private _pickedName(slug: string, audience: string[] | undefined): string {
     const picked = this._pickedPersons[slug];
     if (!picked) {
       return t(this.hass, "alerts.picker.everyone");
     }
-    return this._personChoices().find((choice) => choice.entityId === picked)?.name ?? picked;
+    return (
+      this._personChoices(audience).find((choice) => choice.entityId === picked)?.name ?? picked
+    );
   }
 
   private _pickPerson(slug: string, personEntityId: string): void {
@@ -1066,10 +1088,39 @@ export class SwitchboardAlertsCard extends LitElement implements LovelaceCard {
   /** Moves focus to the first control of the step that just replaced another. */
   private _focusAfterPick(slug: string, selector: string): void {
     void this.updateComplete.then(() => {
-      const menu = Array.from(this.renderRoot.querySelectorAll<HTMLElement>(".snooze-menu")).find(
-        (element) => element.dataset.slug === slug,
-      );
-      menu?.querySelector<HTMLElement>(selector)?.focus();
+      this._menuFor(slug)?.querySelector<HTMLElement>(selector)?.focus();
+    });
+  }
+
+  private _menuFor(slug: string): HTMLElement | undefined {
+    return Array.from(this.renderRoot.querySelectorAll<HTMLElement>(".snooze-menu")).find(
+      (element) => element.dataset.slug === slug,
+    );
+  }
+
+  /**
+   * Collapses one row's disclosure once its snooze is on its way. Leaving
+   * it open would sit there claiming an action the user has already taken,
+   * and on a wall tablet the next person would find somebody else's
+   * half-used menu. The choice is dropped first — without
+   * `_forgetPerson`'s focus move, which would land inside a panel that is
+   * about to close — so the reopened menu starts at "who?" again, and
+   * focus goes back to the summary the user actually pressed.
+   */
+  private _closeSnoozeMenu(slug: string): void {
+    if (this._pickedPersons[slug] !== undefined) {
+      const next = { ...this._pickedPersons };
+      delete next[slug];
+      this._pickedPersons = next;
+    }
+    const details = this._menuFor(slug)?.querySelector("details");
+    const summary = details?.querySelector<HTMLElement>("summary");
+    if (details) {
+      details.open = false;
+    }
+    summary?.setAttribute("aria-expanded", "false");
+    void this.updateComplete.then(() => {
+      summary?.focus();
     });
   }
 
@@ -1105,7 +1156,9 @@ export class SwitchboardAlertsCard extends LitElement implements LovelaceCard {
     if (person) {
       data.person = person;
     }
-    await this.hass.callService("notify_switchboard", "snooze", data);
+    const call = this.hass.callService("notify_switchboard", "snooze", data);
+    this._closeSnoozeMenu(slug);
+    await call;
   }
 }
 

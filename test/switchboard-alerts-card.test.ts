@@ -707,7 +707,9 @@ const LEAK_TARGET = {
   alert_entity: "alert.leak",
   snooze_minutes: [10, 30],
   allow_acknowledge: true,
-  audience: ["person.alice"],
+  // The router only accepts a snooze for a person of this audience
+  // (`person_not_in_audience`), so the picker may only ever offer these.
+  audience: ["person.alice", "person.bob", "notify.hallway_speaker"],
 };
 
 describe("switchboard-alerts-card options derived from the routing table", () => {
@@ -794,6 +796,40 @@ describe("switchboard-alerts-card options derived from the routing table", () =>
     });
   });
 
+  it("hides the snooze menu for a target whose router list is empty", async () => {
+    // `snooze_minutes: []` is the router saying snooze is off for this
+    // row: every duration the card could offer would be refused.
+    const hass = createFakeHass({
+      states: [
+        fakeEntity("alert.leak", "on"),
+        routingTable([{ ...LEAK_TARGET, snooze_minutes: [] }]),
+      ],
+      services: { notify_switchboard: { snooze: {} } },
+    });
+    const card = await mountCard({ type: "custom:switchboard-alerts-card", mode: "full" }, hass);
+    cards.push(card);
+
+    expect(card.shadowRoot?.querySelector(".snooze-menu")).toBeNull();
+  });
+
+  it("still offers the card's own durations over an empty router list", async () => {
+    const hass = createFakeHass({
+      states: [
+        fakeEntity("alert.leak", "on"),
+        routingTable([{ ...LEAK_TARGET, snooze_minutes: [] }]),
+      ],
+      services: { notify_switchboard: { snooze: {} } },
+    });
+    const card = await mountCard(
+      { type: "custom:switchboard-alerts-card", mode: "full", snooze_minutes: [45] },
+      hass,
+    );
+    cards.push(card);
+
+    expect(card.shadowRoot?.querySelector(".snooze-menu")).not.toBeNull();
+    expect(buttonWithText(card, "Snooze for everyone · 45 min")).toBeDefined();
+  });
+
   it("re-renders when the routing table changes", async () => {
     const hass = createFakeHass({
       states: [fakeEntity("alert.leak", "on")],
@@ -833,10 +869,14 @@ describe("switchboard-alerts-card acknowledged-by", () => {
   const alice = () =>
     fakeEntity("person.alice", "home", { attributes: { friendly_name: "Alice" } });
 
+  /** An alert whose last change predates the acknowledgement event above. */
+  const alertBefore = (entityId: string, state: string) =>
+    fakeEntity(entityId, state, { last_changed: "2026-09-07T09:00:00+00:00" });
+
   it("names who acknowledged an acknowledged alert", async () => {
     const hass = createFakeHass({
       states: [
-        fakeEntity("alert.leak", "off"),
+        alertBefore("alert.leak", "off"),
         routingTable([LEAK_TARGET]),
         acknowledged(),
         alice(),
@@ -853,7 +893,7 @@ describe("switchboard-alerts-card acknowledged-by", () => {
   it("says nothing on an alert that is still active", async () => {
     const hass = createFakeHass({
       states: [
-        fakeEntity("alert.leak", "on"),
+        alertBefore("alert.leak", "on"),
         routingTable([LEAK_TARGET]),
         acknowledged(),
         alice(),
@@ -868,7 +908,7 @@ describe("switchboard-alerts-card acknowledged-by", () => {
   it("says nothing once a later event replaced the acknowledgement", async () => {
     const hass = createFakeHass({
       states: [
-        fakeEntity("alert.leak", "off"),
+        alertBefore("alert.leak", "off"),
         routingTable([LEAK_TARGET]),
         deliveryEvent("routed", { target: "leak", person: "person.alice" }),
         alice(),
@@ -883,8 +923,25 @@ describe("switchboard-alerts-card acknowledged-by", () => {
   it("does not attribute one target's acknowledgement to another alert", async () => {
     const hass = createFakeHass({
       states: [
-        fakeEntity("alert.door", "off"),
+        alertBefore("alert.door", "off"),
         routingTable([LEAK_TARGET, { ...LEAK_TARGET, slug: "door", alert_entity: "alert.door" }]),
+        acknowledged(),
+        alice(),
+      ],
+    });
+    const card = await mountCard({ type: "custom:switchboard-alerts-card", mode: "full" }, hass);
+    cards.push(card);
+
+    expect(card.shadowRoot?.querySelector(".acknowledged-by")).toBeNull();
+  });
+
+  it("says nothing once the alert itself changed after the acknowledgement", async () => {
+    const hass = createFakeHass({
+      states: [
+        // The alert went off *after* the event entity's last acknowledgement:
+        // whoever acknowledged did not acknowledge this one.
+        fakeEntity("alert.leak", "off", { last_changed: "2026-09-07T11:00:00+00:00" }),
+        routingTable([LEAK_TARGET]),
         acknowledged(),
         alice(),
       ],
@@ -898,7 +955,7 @@ describe("switchboard-alerts-card acknowledged-by", () => {
   it("says nothing at all against a router that publishes no authorship", async () => {
     const hass = createFakeHass({
       states: [
-        fakeEntity("alert.leak", "off"),
+        alertBefore("alert.leak", "off"),
         routingTable([LEAK_TARGET]),
         deliveryEvent("acknowledged", { target: "leak", user_id: null }),
       ],
@@ -928,7 +985,7 @@ describe("switchboard-alerts-card kiosk person picker", () => {
   ): Promise<{ card: SwitchboardAlertsCard; hass: ReturnType<typeof createFakeHass> }> {
     const hass = createFakeHass({
       states: [
-        fakeEntity("alert.leak", "on"),
+        fakeEntity("alert.leak", "on", { attributes: { friendly_name: "Water leak" } }),
         routingTable([{ ...LEAK_TARGET, snooze_minutes: [15] }], PERSONS),
         fakeEntity("person.alice", "home", { attributes: { friendly_name: "Alice" } }),
         fakeEntity("person.bob", "home", { attributes: { friendly_name: "Bob" } }),
@@ -1052,6 +1109,74 @@ describe("switchboard-alerts-card kiosk person picker", () => {
 
     expect(card.shadowRoot?.querySelector(".picker-step")).toBeNull();
     expect(card.shadowRoot?.querySelector(".snooze-options")).not.toBeNull();
+  });
+
+  it("never offers a person outside the target's audience", async () => {
+    const hass = createFakeHass({
+      states: [
+        fakeEntity("alert.leak", "on"),
+        // Bob is a configured person, but not in this target's audience:
+        // `notify_switchboard.snooze` would refuse him.
+        routingTable([{ ...LEAK_TARGET, audience: ["person.alice"] }], PERSONS),
+        fakeEntity("person.alice", "home", { attributes: { friendly_name: "Alice" } }),
+        fakeEntity("person.bob", "home", { attributes: { friendly_name: "Bob" } }),
+      ],
+      services: { notify_switchboard: { snooze: {} } },
+    });
+    const card = await mountCard(
+      { type: "custom:switchboard-alerts-card", mode: "full", person_picker: true },
+      hass,
+    );
+    cards.push(card);
+
+    const names = Array.from(card.shadowRoot?.querySelectorAll(".picker-step button") ?? []).map(
+      (button) => button.textContent?.trim(),
+    );
+    expect(names).toEqual(["Alice", "Everyone"]);
+  });
+
+  it("shows no picker at all when the audience names nobody", async () => {
+    const hass = createFakeHass({
+      states: [
+        fakeEntity("alert.leak", "on"),
+        routingTable([{ ...LEAK_TARGET, audience: ["notify.hallway_speaker"] }], PERSONS),
+      ],
+      services: { notify_switchboard: { snooze: {} } },
+    });
+    const card = await mountCard(
+      { type: "custom:switchboard-alerts-card", mode: "full", person_picker: true },
+      hass,
+    );
+    cards.push(card);
+
+    expect(card.shadowRoot?.querySelector(".picker-step")).toBeNull();
+    expect(card.shadowRoot?.querySelector(".snooze-options")).not.toBeNull();
+  });
+
+  it("names the alert in the picker's group label", async () => {
+    const { card } = await mountPicker();
+    expect(card.shadowRoot?.querySelector(".picker-step")?.getAttribute("aria-label")).toBe(
+      "Snooze Water leak for whom?",
+    );
+  });
+
+  it("closes the menu and returns focus to Snooze once a duration is picked", async () => {
+    const { card } = await mountPicker();
+
+    buttonWithText(card, "Alice")?.click();
+    await card.updateComplete;
+    const details = card.shadowRoot?.querySelector("details") as HTMLDetailsElement;
+    details.open = true;
+
+    buttonWithText(card, "Snooze 15 min")?.click();
+    await card.updateComplete;
+    await card.updateComplete;
+
+    expect(details.open).toBe(false);
+    expect(details.querySelector("summary")?.getAttribute("aria-expanded")).toBe("false");
+    expect(card.shadowRoot?.activeElement?.tagName).toBe("SUMMARY");
+    // Back to step one: the next person to touch the tablet is asked again.
+    expect(card.shadowRoot?.querySelector(".picker-step")).not.toBeNull();
   });
 
   it("forgets the choice when the menu is closed again", async () => {

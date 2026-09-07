@@ -145,12 +145,19 @@ person_picker: false
   `alert_entity`), so you only need this option to override the router or
   to map an alert it does not own. Without a mapping from either source,
   Acknowledge falls back to `alert.turn_off` and Snooze never appears for
-  that entity.
+  that entity. Acknowledge also falls back to `alert.turn_off` for a
+  routing-table row that has no `alert_entity` of its own, which is
+  exactly when `notify_switchboard.acknowledge` would refuse the call.
 - `snooze_minutes` — **optional since router 0.7.0.** Durations (positive
   whole minutes) offered in the snooze menu. Left unset, each target's own
   `snooze_minutes` from the routing table is used, falling back to
-  `[15, 60, 480]` when the router publishes none. Set, it applies to every
-  target on the card.
+  `[15, 60, 480]` only when the routing table holds no row for that alert.
+  Set, it applies to every target on the card — so if your card already
+  carries `snooze_minutes: [15, 60, 480]` from the 0.1.x editor, **delete
+  the option** to pick up each target's own durations instead. A target
+  the routing table publishes with an empty `snooze_minutes` has snooze
+  switched off: the router refuses every duration for it, so the card
+  shows no snooze menu on that alert at all.
 - `person` — optional `person.*` entity the snooze applies to. **Without
   it, `notify_switchboard.snooze` snoozes the target for the whole
   audience**, and the menu says so ("Snooze for everyone · 15 min").
@@ -159,11 +166,15 @@ person_picker: false
   table publishes (named from their `person.*` state) plus an explicit
   "Everyone", and what you pick is the `person` passed to
   `notify_switchboard.snooze` for that one call — it overrides the
-  `person` option and is forgotten when the menu closes. Intended for a
+  `person` option and is forgotten when the menu closes, which it does on
+  its own as soon as a duration is picked. Only the persons of **that
+  target's own audience** are offered: the router refuses a snooze for
+  anybody else, so a name it would refuse is never shown. Intended for a
   shared wall tablet, where the card has no idea who is standing in front
   of it. Acknowledge never asks: the router reads the acting user from the
   call's own context. Defaults to `false`, and never appears when the
-  routing table names nobody (router below 0.7.0 included).
+  target's audience names no person (an audience of bare `notify.*`
+  outputs, or a router below 0.7.0).
 
 Every option is validated in `setConfig`: a bad shape (for instance
 `entities: alert.leak` as a bare string, or `mode: tiny`) produces a
@@ -180,9 +191,12 @@ payload of `event.switchboard_delivery` and nowhere else — no sensor, no
 stored record — and a Home Assistant event entity keeps only its **last**
 event. So the line is shown while the last delivery event is this target's
 acknowledgement, and disappears as soon as any later routing event
-replaces it. When the router could not resolve the acting user to a
-`person.*`, a shortened user id is shown rather than a guess; when it
-knows neither, nothing is shown.
+replaces it. It also disappears when the alert itself has changed since
+that event — an alert that fired again is a new one nobody has
+acknowledged yet, and the earlier acknowledger is not credited with it.
+When the router could not resolve the acting user to a `person.*`, a
+shortened user id is shown rather than a guess; when it knows neither,
+nothing is shown.
 
 Clicking an alert's name opens Home Assistant's more-info dialog for it.
 

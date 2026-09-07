@@ -55,6 +55,7 @@ describe("lastAcknowledgement", () => {
   it("reads the payload of an acknowledged event", () => {
     const hass = createFakeHass({ states: [ACKNOWLEDGED] });
     expect(lastAcknowledgement(hass)).toEqual({
+      at: "2026-09-07T10:00:00+00:00",
       target: "leak",
       alertEntity: "alert.leak_kitchen",
       person: "person.alice",
@@ -127,5 +128,47 @@ describe("acknowledgedByForAlert", () => {
   it("matches on the event's alert_entity when no slug is known", () => {
     expect(acknowledgedByForAlert(hass, "alert.leak_kitchen", undefined)).toBe("Alice");
     expect(acknowledgedByForAlert(hass, "alert.door_left_open", undefined)).toBeUndefined();
+  });
+
+  /**
+   * The event entity keeps only the *last* event. An alert that has since
+   * fired again is not the one that acknowledgement was about, so naming
+   * somebody under it would credit them with an alert they never saw.
+   */
+  it("says nothing when the alert changed after the acknowledgement", () => {
+    const stale = createFakeHass({
+      states: [
+        ACKNOWLEDGED,
+        fakeEntity("person.alice", "home", { attributes: { friendly_name: "Alice" } }),
+        fakeEntity("alert.leak_kitchen", "off", {
+          last_changed: "2026-09-07T10:30:00+00:00",
+        }),
+      ],
+    });
+    expect(acknowledgedByForAlert(stale, "alert.leak_kitchen", "leak")).toBeUndefined();
+  });
+
+  it("still names the acknowledger when the alert has not changed since", () => {
+    const fresh = createFakeHass({
+      states: [
+        ACKNOWLEDGED,
+        fakeEntity("person.alice", "home", { attributes: { friendly_name: "Alice" } }),
+        fakeEntity("alert.leak_kitchen", "off", {
+          last_changed: "2026-09-07T10:00:00+00:00",
+        }),
+      ],
+    });
+    expect(acknowledgedByForAlert(fresh, "alert.leak_kitchen", "leak")).toBe("Alice");
+  });
+
+  it("does not suppress the line when either timestamp is unreadable", () => {
+    const odd = createFakeHass({
+      states: [
+        ACKNOWLEDGED,
+        fakeEntity("person.alice", "home", { attributes: { friendly_name: "Alice" } }),
+        fakeEntity("alert.leak_kitchen", "off", { last_changed: "not a date" }),
+      ],
+    });
+    expect(acknowledgedByForAlert(odd, "alert.leak_kitchen", "leak")).toBe("Alice");
   });
 });

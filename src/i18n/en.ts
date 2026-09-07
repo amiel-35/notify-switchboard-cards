@@ -12,6 +12,7 @@ export const en = {
   "alerts.action.snooze_minutes_everyone": "Snooze for everyone · {minutes} min",
   "alerts.action.more_info": "Show details for {name}",
   "alerts.picker.prompt": "Snooze for whom?",
+  "alerts.picker.prompt_for": "Snooze {name} for whom?",
   "alerts.picker.everyone": "Everyone",
   "alerts.picker.chosen": "For: {name}",
   "alerts.picker.change": "Change",

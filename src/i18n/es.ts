@@ -14,6 +14,7 @@ export const es: Record<TranslationKey, string> = {
   "alerts.action.snooze_minutes_everyone": "Posponer para todos · {minutes} min",
   "alerts.action.more_info": "Mostrar detalles de {name}",
   "alerts.picker.prompt": "¿Posponer para quién?",
+  "alerts.picker.prompt_for": "¿Posponer {name} para quién?",
   "alerts.picker.everyone": "Todos",
   "alerts.picker.chosen": "Para: {name}",
   "alerts.picker.change": "Cambiar",

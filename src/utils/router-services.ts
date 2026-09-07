@@ -47,13 +47,26 @@ export interface ResolvedAlertTarget {
   /** Where the slug came from — reported in the UI, not just diagnostics. */
   source: "config" | "routing_table" | "none";
   /**
-   * `false` only when the routing table says this target refuses
-   * acknowledgement, in which case `notify_switchboard.acknowledge` would
-   * refuse the call and the card uses `alert.turn_off` instead.
+   * `false` when the routing table says this target refuses
+   * acknowledgement — either because it opts out or because it has no
+   * `alert.*` to turn off, which is the router's own test
+   * (`bool(alert_entity) and allow_acknowledge`). In both cases
+   * `notify_switchboard.acknowledge` would refuse the call and the card
+   * uses `alert.turn_off` instead.
    */
   allowAcknowledge: boolean;
-  /** The durations to offer, options first, then the target's, then the default. */
+  /**
+   * The durations to offer: the card's options first, then the target's
+   * own list — **empty included**, which is the router saying snooze is
+   * off for this target — and the built-in default only when no row was
+   * derived at all.
+   */
   snoozeMinutes: number[];
+  /**
+   * The row's audience, verbatim (bare `notify.*` outputs included), or
+   * `undefined` when no row was derived. Scopes the person picker.
+   */
+  audience: string[] | undefined;
 }
 
 export function resolveAlertTarget(
@@ -69,17 +82,29 @@ export function resolveAlertTarget(
   const slug = configured ?? derived?.slug;
   const row = configured ? (targetBySlug(table, configured) ?? derived) : derived;
 
+  /*
+   * An empty `snooze_minutes` on a row is not "say nothing": the router
+   * refuses any duration that is not in the row's own list
+   * (`snooze_minutes_not_offered`, dispatcher `async_service_snooze`), so
+   * an empty list means snooze is off for that target and the card must
+   * offer none. The built-in default therefore applies only when no row
+   * was derived at all — the 0.1.x path, where the card is the only
+   * source of durations.
+   */
   const snoozeMinutes =
     options.snoozeMinutes && options.snoozeMinutes.length > 0
       ? options.snoozeMinutes
-      : row?.snoozeMinutes && row.snoozeMinutes.length > 0
+      : row
         ? row.snoozeMinutes
         : DEFAULT_SNOOZE_MINUTES;
 
   return {
     slug,
     source: configured ? "config" : derived ? "routing_table" : "none",
-    allowAcknowledge: row?.allowAcknowledge !== false,
+    // The router's own condition: a row with no `alert.*` has nothing to
+    // turn off, whatever `allow_acknowledge` says.
+    allowAcknowledge: row ? row.allowAcknowledge !== false && row.alertEntity !== null : true,
     snoozeMinutes,
+    audience: row?.audience,
   };
 }

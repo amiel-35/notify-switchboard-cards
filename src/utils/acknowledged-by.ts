@@ -20,6 +20,8 @@ import type { HomeAssistant } from "../ha-types";
 import { DELIVERY_EVENT_ENTITY } from "../types";
 
 export interface Acknowledgement {
+  /** When it happened: the event entity's state, an ISO timestamp. */
+  at: string;
   /** The target slug the acknowledgement was for. */
   target: string;
   /** The `alert.*` that was turned off, or `null`. */
@@ -58,6 +60,7 @@ export function lastAcknowledgement(hass: HomeAssistant | undefined): Acknowledg
     return undefined;
   }
   return {
+    at: stateObj.state,
     target,
     alertEntity: asStringOrNull(attributes.alert_entity),
     person: asStringOrNull(attributes.person),
@@ -95,9 +98,38 @@ export function acknowledgedByName(
 }
 
 /**
+ * `true` when the alert has changed since the acknowledgement, i.e. the
+ * event is about an earlier round of the same alert. Unreadable
+ * timestamps — a missing entity, a router that publishes something that is
+ * not a date — answer `false`: the line is only dropped on evidence, never
+ * on a guess.
+ */
+function alertChangedSince(
+  hass: HomeAssistant | undefined,
+  alertEntityId: string,
+  at: string,
+): boolean {
+  const lastChanged = hass?.states?.[alertEntityId]?.last_changed;
+  if (typeof lastChanged !== "string") {
+    return false;
+  }
+  const alertAt = Date.parse(lastChanged);
+  const eventAt = Date.parse(at);
+  if (Number.isNaN(alertAt) || Number.isNaN(eventAt)) {
+    return false;
+  }
+  return alertAt > eventAt;
+}
+
+/**
  * The name to show on one alert row, or `undefined`. The acknowledgement
  * has to be *this* row's: matched on the target slug when the card knows
  * it, and on the `alert_entity` the event carries otherwise.
+ *
+ * It also has to be about the alert as it stands now. The event entity
+ * keeps only the last event, so an alert that fired again after that
+ * event is a *new* alert nobody has acknowledged yet — naming somebody
+ * under it would credit them with an alert they never saw.
  */
 export function acknowledgedByForAlert(
   hass: HomeAssistant | undefined,
@@ -111,5 +143,8 @@ export function acknowledgedByForAlert(
   const matches = slug
     ? acknowledgement.target === slug
     : acknowledgement.alertEntity === alertEntityId;
-  return matches ? acknowledgedByName(hass, acknowledgement) : undefined;
+  if (!matches || alertChangedSince(hass, alertEntityId, acknowledgement.at)) {
+    return undefined;
+  }
+  return acknowledgedByName(hass, acknowledgement);
 }
