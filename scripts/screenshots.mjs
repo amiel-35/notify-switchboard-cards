@@ -123,7 +123,10 @@ async function main() {
 
   try {
     // --- Light theme, desktop ---------------------------------------
-    const lightCtx = await newEnglishContext(browser, { viewport: DESKTOP_VIEWPORT, colorScheme: "light" });
+    const lightCtx = await newEnglishContext(browser, {
+      viewport: DESKTOP_VIEWPORT,
+      colorScheme: "light",
+    });
     const lightPage = await lightCtx.newPage();
     await lightPage.goto(DASHBOARD_URL, { waitUntil: "networkidle" });
     await waitForDashboardReady(lightPage);
@@ -142,7 +145,10 @@ async function main() {
     await lightCtx.close();
 
     // --- Dark theme, desktop ------------------------------------------
-    const darkCtx = await newEnglishContext(browser, { viewport: DESKTOP_VIEWPORT, colorScheme: "dark" });
+    const darkCtx = await newEnglishContext(browser, {
+      viewport: DESKTOP_VIEWPORT,
+      colorScheme: "dark",
+    });
     const darkPage = await darkCtx.newPage();
     await darkPage.goto(DASHBOARD_URL, { waitUntil: "networkidle" });
     await waitForDashboardReady(darkPage);
@@ -154,7 +160,10 @@ async function main() {
     await darkCtx.close();
 
     // --- Light theme, mobile viewport ----------------------------------
-    const mobileCtx = await newEnglishContext(browser, { viewport: MOBILE_VIEWPORT, colorScheme: "light" });
+    const mobileCtx = await newEnglishContext(browser, {
+      viewport: MOBILE_VIEWPORT,
+      colorScheme: "light",
+    });
     const mobilePage = await mobileCtx.newPage();
     await mobilePage.goto(DASHBOARD_URL, { waitUntil: "networkidle" });
     await waitForDashboardReady(mobilePage);
