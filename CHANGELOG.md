@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.2.0] - 2026-09-07
 
+**Highlights**
+
+- If your card config still sets `snooze_minutes: [15, 60, 480]` from the
+  0.1.x editor, remove it — the card now takes its durations from the
+  router instead, and that old default would be rejected.
+- Both cards now read Notify Switchboard 0.7.0's routing table, so target,
+  snooze durations, and wake time no longer need to be repeated in YAML.
+- The alerts card shows who acknowledged an alert, and can ask a kiosk
+  user who they're snoozing for before acting.
+- The README's new "Router version matrix" spells out what each router
+  version (0.1–0.7) unlocks in these cards.
+
 Consumes Notify Switchboard 0.7.0. Nothing here is required: against an
 older router every 0.1.x behaviour is unchanged.
 
@@ -98,6 +110,15 @@ older router every 0.1.x behaviour is unchanged.
 
 ## [0.1.1] - 2026-09-07
 
+**Highlights**
+
+- Fixes the compact alerts badge title wrapping letter-by-letter in a
+  narrow sections column.
+- The compact badge shows count chips only by default; its title only
+  appears once explicitly configured, and it no longer wraps.
+- The badge now asks dashboards for a little more column width so it
+  isn't squeezed down to a single column.
+
 ### Fixed
 
 - `switchboard-alerts-card` compact badge: the title no longer wraps
@@ -110,6 +131,20 @@ older router every 0.1.x behaviour is unchanged.
   squeeze it down to a single column in the first place. (#1)
 
 ## [0.1.0] - 2026-09-07
+
+**Highlights**
+
+- Initial release: `switchboard-alerts-card` (list, acknowledge, and
+  snooze alerts) and `switchboard-silence-tile` (one person's silence
+  status and controls).
+- Config is validated up front — a bad option shows a clear Lovelace
+  error naming it instead of a card that crashes.
+- Accessible by default: focus-trapped dialogs, icon-plus-text state
+  (never colour alone), and disabled actions that stay focusable and
+  explain themselves.
+- Visual editors with English, French, and Spanish translations, with a
+  graceful fallback to native `alert.*` actions where a Notify
+  Switchboard service isn't available yet.
 
 ### Added
 
@@ -169,3 +204,8 @@ older router every 0.1.x behaviour is unchanged.
 - The dialog scrim uses `--dialog-scrim-color`, hover text uses
   `--text-primary-color`, and the host no longer paints its own background
   over the theme's `ha-card`.
+
+[Unreleased]: https://github.com/amiel-35/notify-switchboard-cards/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/amiel-35/notify-switchboard-cards/compare/v0.1.1...v0.2.0
+[0.1.1]: https://github.com/amiel-35/notify-switchboard-cards/compare/v0.1.0...v0.1.1
+[0.1.0]: https://github.com/amiel-35/notify-switchboard-cards/releases/tag/v0.1.0
