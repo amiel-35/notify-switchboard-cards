@@ -92,8 +92,10 @@ async function waitForDashboardReady(page) {
 // honours a JSON-encoded `selectedLanguage` key in localStorage.
 async function newEnglishContext(browser, options) {
   const ctx = await browser.newContext({ locale: "en-US", ...options });
+  // This callback is serialised and evaluated inside the page, not in Node.
   await ctx.addInitScript(() => {
-    localStorage.setItem("selectedLanguage", JSON.stringify("en"));
+    /* global window */
+    window.localStorage.setItem("selectedLanguage", JSON.stringify("en"));
   });
   return ctx;
 }
