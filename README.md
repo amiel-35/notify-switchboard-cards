@@ -29,7 +29,7 @@ Two cards are included:
 Captured against a real Home Assistant 2026.9 instance with
 `scripts/screenshots.mjs` (see [CONTRIBUTING.md](CONTRIBUTING.md)).
 
-> **Note:** the router services `notify_switchboard.acknowledge`, `snooze`, `unsnooze`, `silence` and `unsilence` are planned for Notify Switchboard 0.2.0 and are **not yet part of the frozen router contract**. Until they ship, the silence tile's buttons stay disabled (with an explanation) and the snooze menu is hidden; acknowledging falls back to `alert.turn_off`.
+> **Note:** these cards (currently 0.1.1) target [Notify Switchboard](https://github.com/amiel-35/notify-switchboard) 0.5.1 and degrade gracefully against any earlier router release. See the [Router version matrix](#router-version-matrix) below for exactly what each router version unlocks — below 0.2, the silence tile's buttons stay disabled (with an explanation) and the snooze menu is hidden; acknowledging falls back to `alert.turn_off`.
 
 ## Compatibility
 
@@ -45,12 +45,32 @@ instance-wide entities `sensor.switchboard_dropped_today` and
 absent (or `unknown` / `unavailable`), the footer is simply not rendered.
 
 The router's dedicated services (`notify_switchboard.acknowledge`,
-`snooze`, `silence`, `unsnooze`, `unsilence`) are planned for Notify
+`snooze`, `silence`, `unsnooze`, `unsilence`) shipped in Notify
 Switchboard 0.2.0. **Every action in these cards checks `hass.services`
 before calling one of those services and falls back to the native
 `alert.turn_off` / `alert.turn_on` actions, or marks itself `aria-disabled`
 with a visible "Requires Notify Switchboard ≥ 0.2.0" line, when the service
-does not exist yet.** Nothing in these cards requires 0.2.0 to be usable.
+is not present.** Nothing in these cards requires router 0.2.0 or later to
+be usable — see the matrix below for the full picture.
+
+## Router version matrix
+
+The cards read whatever the connected router version exposes and fall
+back gracefully otherwise. This is the version at which each router
+feature became available, and what it changes in these cards:
+
+| Router version | What's available | What these cards do |
+|---|---|---|
+| 0.1.x | `alert.*` entities, `alert.turn_off` | Alerts card lists and acknowledges alerts via `alert.turn_off`. Silence tile renders, but every button is `aria-disabled` with a "Requires Notify Switchboard ≥ 0.2.0" hint — there is no dedicated service to call yet. |
+| 0.2.x | `notify_switchboard.acknowledge` / `snooze` / `unsnooze` / `silence` / `unsilence` services | Acknowledge and the snooze menu use the dedicated services instead of the `alert.turn_off` fallback; the silence tile's four buttons become active. |
+| 0.3.x | Translated entity names, frozen entity ids: `binary_sensor.<person>_silenced`, `sensor.<person>_active_snoozes`, `sensor.switchboard_deferred_today` | No visible change — the cards already target these ids; 0.3 just guarantees they won't move. |
+| 0.4.x | `notify_switchboard.explain` response service | No effect on these cards; neither card calls `explain` yet. |
+| 0.5.x | Wake-time summary notifications (tagged `switchboard-summary`), episode `done` filtering | No effect on these cards; they read entity/alert state, not notification content. |
+| 0.7.0 (not yet released) | `sensor.switchboard_routing_table`, `acknowledged` event payload with `user_id` / `person` | Not yet consumed. Once released, a future cards release (0.2.0) will read the routing table to derive `target_map`, `snooze_minutes` and `wake_time` instead of requiring them in the card config. |
+
+Until router 0.7.0 ships, `target_map`, `snooze_minutes` and `wake_time`
+remain required in the card config — there is no entity yet to derive
+them from.
 
 ## Installation
 
@@ -109,8 +129,12 @@ person: person.alice # optional
 - `target_map` — maps an `alert.*` entity to its Notify Switchboard target
   slug (the `notify.switchboard_<slug>` row), so Acknowledge can call
   `notify_switchboard.acknowledge` and the Snooze menu can appear once
-  0.2.0 is installed. Without a mapping, Acknowledge always falls back to
-  `alert.turn_off`, and Snooze never appears for that entity.
+  router 0.2.0 or later is installed (see the
+  [Router version matrix](#router-version-matrix)). Without a mapping,
+  Acknowledge always falls back to `alert.turn_off`, and Snooze never
+  appears for that entity. Required today; a future cards release will
+  derive it from `sensor.switchboard_routing_table` once router 0.7.0
+  ships.
 - `snooze_minutes` — durations (positive whole minutes) offered in the
   snooze menu. Defaults to `[15, 60, 480]`.
 - `person` — optional `person.*` entity the snooze applies to. **Without
