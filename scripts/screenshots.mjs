@@ -72,10 +72,11 @@ async function waitForDashboardReady(page) {
     .first()
     .waitFor({ state: "attached", timeout: 15_000 });
   // ...and any in-flight history/logbook fetch the alerts card kicks off on
-  // first render must have resolved (it briefly shows a French "Chargement
-  // des données ..." placeholder while HA's <ha-circular-progress> spins).
+  // first render must have resolved (it briefly shows a "Loading data..."
+  // placeholder with a spinner). Wait on the spinner element, not on the
+  // text, so this does not depend on the UI language.
   await page
-    .getByText("Chargement des données")
+    .locator("switchboard-alerts-card ha-spinner, switchboard-alerts-card ha-circular-progress")
     .first()
     .waitFor({ state: "detached", timeout: 10_000 })
     .catch(() => {
@@ -84,6 +85,17 @@ async function waitForDashboardReady(page) {
   await page.waitForLoadState("networkidle");
   // Let card_mod/theme transitions and the ha-card raise-on-hover settle.
   await page.waitForTimeout(500);
+}
+
+// The README documents the English UI. The HA frontend takes its language from
+// the user's profile (or the browser), so force it per context: the frontend
+// honours a JSON-encoded `selectedLanguage` key in localStorage.
+async function newEnglishContext(browser, options) {
+  const ctx = await browser.newContext({ locale: "en-US", ...options });
+  await ctx.addInitScript(() => {
+    localStorage.setItem("selectedLanguage", JSON.stringify("en"));
+  });
+  return ctx;
 }
 
 async function shootElement(locator, path) {
@@ -109,7 +121,7 @@ async function main() {
 
   try {
     // --- Light theme, desktop ---------------------------------------
-    const lightCtx = await browser.newContext({ viewport: DESKTOP_VIEWPORT, colorScheme: "light" });
+    const lightCtx = await newEnglishContext(browser, { viewport: DESKTOP_VIEWPORT, colorScheme: "light" });
     const lightPage = await lightCtx.newPage();
     await lightPage.goto(DASHBOARD_URL, { waitUntil: "networkidle" });
     await waitForDashboardReady(lightPage);
@@ -128,7 +140,7 @@ async function main() {
     await lightCtx.close();
 
     // --- Dark theme, desktop ------------------------------------------
-    const darkCtx = await browser.newContext({ viewport: DESKTOP_VIEWPORT, colorScheme: "dark" });
+    const darkCtx = await newEnglishContext(browser, { viewport: DESKTOP_VIEWPORT, colorScheme: "dark" });
     const darkPage = await darkCtx.newPage();
     await darkPage.goto(DASHBOARD_URL, { waitUntil: "networkidle" });
     await waitForDashboardReady(darkPage);
@@ -140,7 +152,7 @@ async function main() {
     await darkCtx.close();
 
     // --- Light theme, mobile viewport ----------------------------------
-    const mobileCtx = await browser.newContext({ viewport: MOBILE_VIEWPORT, colorScheme: "light" });
+    const mobileCtx = await newEnglishContext(browser, { viewport: MOBILE_VIEWPORT, colorScheme: "light" });
     const mobilePage = await mobileCtx.newPage();
     await mobilePage.goto(DASHBOARD_URL, { waitUntil: "networkidle" });
     await waitForDashboardReady(mobilePage);
