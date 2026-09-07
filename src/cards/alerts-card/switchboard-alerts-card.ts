@@ -6,13 +6,19 @@ import type {
   LovelaceCardConfig,
   LovelaceGridOptions,
 } from "../../ha-types";
-import type { AlertRowKind, SwitchboardAlertsCardConfig } from "../../types";
-import { DEFAULT_SNOOZE_MINUTES, DELIVERY_EVENT_ENTITY, DROPPED_TODAY_ENTITY } from "../../types";
+import type { AlertRowKind, SwitchboardAlertsCardConfig, TargetMap } from "../../types";
+import { DELIVERY_EVENT_ENTITY, DROPPED_TODAY_ENTITY, ROUTING_TABLE_ENTITY } from "../../types";
 import { sharedStyles } from "../../styles/shared-styles";
 import { t } from "../../i18n";
 import { formatRelativeDuration } from "../../utils/format-duration";
 import { fireEvent } from "../../utils/fire-event";
-import { hasRouterService, resolveTargetSlug } from "../../utils/router-services";
+import {
+  hasRouterService,
+  resolveAlertTarget,
+  type ResolvedAlertTarget,
+} from "../../utils/router-services";
+import { personChoices, readRoutingTable, type RoutingTable } from "../../utils/routing-table";
+import { acknowledgedByForAlert } from "../../utils/acknowledged-by";
 import {
   validateEntityId,
   validateEntityList,
@@ -227,6 +233,40 @@ export class SwitchboardAlertsCard extends LitElement implements LovelaceCard {
         margin-top: 4px;
       }
 
+      /*
+       * Kiosk person picker. It lives inside the same disclosure as the
+       * durations — one panel, two steps — so a wall tablet never has to
+       * hit a second popup, and the whole thing stays inside the focus
+       * trap the compact dialog already installs.
+       */
+      .picker-step {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        margin-top: 4px;
+      }
+
+      .picker-prompt {
+        color: var(--secondary-text-color);
+        font-size: 0.8125rem;
+        padding: 0 4px;
+      }
+
+      .picker-chosen {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+        font-size: 0.8125rem;
+        color: var(--secondary-text-color);
+        padding: 0 4px;
+      }
+
+      .acknowledged-by {
+        color: var(--secondary-text-color);
+        font-size: 0.8125rem;
+      }
+
       .card-footer {
         display: flex;
         flex-wrap: wrap;
@@ -243,12 +283,19 @@ export class SwitchboardAlertsCard extends LitElement implements LovelaceCard {
     _config: { state: true },
     _dialogOpen: { state: true },
     _now: { state: true },
+    _pickedPersons: { state: true },
   };
 
   hass?: HomeAssistant;
 
   private _config?: SwitchboardAlertsCardConfig;
   private _dialogOpen = false;
+  /**
+   * Per-target choice made in the kiosk picker: a `person.*` entity id, or
+   * the empty string for "everyone". A slug that is absent from the map
+   * has not been chosen yet, which is what puts the menu on step 1.
+   */
+  private _pickedPersons: Record<string, string> = {};
   private _now = Date.now();
   private _tickHandle?: ReturnType<typeof setInterval>;
   private _lastFocused?: HTMLElement | null;
@@ -284,10 +331,28 @@ export class SwitchboardAlertsCard extends LitElement implements LovelaceCard {
       mode: validateMode(CARD_NAME, "mode", raw.mode) ?? "full",
       show_acknowledged:
         validateOptionalBoolean(CARD_NAME, "show_acknowledged", raw.show_acknowledged) ?? true,
-      snooze_minutes:
-        validatePositiveIntegerList(CARD_NAME, "snooze_minutes", raw.snooze_minutes) ??
-        DEFAULT_SNOOZE_MINUTES,
+      person_picker:
+        validateOptionalBoolean(CARD_NAME, "person_picker", raw.person_picker) ?? false,
     };
+
+    /*
+     * `snooze_minutes` is deliberately *not* defaulted here. Since router
+     * 0.7.0 each target publishes its own durations, and a config that
+     * silently carried `[15, 60, 480]` would be indistinguishable from a
+     * user who asked for exactly that — the override would always win and
+     * the routing table would never be read. The default is applied at
+     * render time instead, once both sources are known.
+     */
+    const snoozeMinutes = validatePositiveIntegerList(
+      CARD_NAME,
+      "snooze_minutes",
+      raw.snooze_minutes,
+    );
+    if (snoozeMinutes === undefined) {
+      delete validated.snooze_minutes;
+    } else {
+      validated.snooze_minutes = snoozeMinutes;
+    }
 
     const entities = validateEntityList(CARD_NAME, "entities", raw.entities, "alert");
     if (entities === undefined) {
@@ -383,6 +448,7 @@ export class SwitchboardAlertsCard extends LitElement implements LovelaceCard {
       ...this._watchedEntityIds(hass),
       DROPPED_TODAY_ENTITY,
       DELIVERY_EVENT_ENTITY,
+      ROUTING_TABLE_ENTITY,
     ]);
     for (const entityId of watched) {
       if (oldHass.states[entityId] !== hass.states[entityId]) {
@@ -703,9 +769,18 @@ export class SwitchboardAlertsCard extends LitElement implements LovelaceCard {
       hass.locale?.language ?? hass.language ?? "en",
       new Date(this._now),
     );
-    const slug = resolveTargetSlug(entityId, this._config?.target_map);
-    const canSnooze = !isUnavailable && Boolean(slug) && hasRouterService(hass, "snooze");
-    const snoozeMinutes = this._config?.snooze_minutes ?? DEFAULT_SNOOZE_MINUTES;
+    const target = this._resolveTarget(entityId);
+    const slug = target.slug;
+    // No duration to offer is no menu: the router refuses any duration
+    // that is not in the target's own `snooze_minutes`, so a row the table
+    // publishes with an empty list has snooze switched off.
+    const canSnooze =
+      !isUnavailable &&
+      Boolean(slug) &&
+      target.snoozeMinutes.length > 0 &&
+      hasRouterService(hass, "snooze");
+    const acknowledgedBy =
+      kind === "acknowledged" ? acknowledgedByForAlert(hass, entityId, slug) : undefined;
 
     let chipClass: string;
     let chipIcon: string;
@@ -742,6 +817,13 @@ export class SwitchboardAlertsCard extends LitElement implements LovelaceCard {
             </span>
             <span class="alert-since wrap-text">${since}</span>
           </div>
+          ${
+            acknowledgedBy
+              ? html`<span class="acknowledged-by wrap-text"
+                  >${t(hass, "alerts.acknowledged_by", { name: acknowledgedBy })}</span
+                >`
+              : nothing
+          }
         </div>
         <div class="alert-actions">
           ${
@@ -752,7 +834,7 @@ export class SwitchboardAlertsCard extends LitElement implements LovelaceCard {
                     <button
                       class="action-button touch-target"
                       type="button"
-                      @click=${() => this._acknowledge(entityId, slug)}
+                      @click=${() => this._acknowledge(entityId, target)}
                     >
                       ${t(hass, "alerts.action.acknowledge")}
                     </button>
@@ -767,7 +849,7 @@ export class SwitchboardAlertsCard extends LitElement implements LovelaceCard {
                     </button>
                   `
           }
-          ${canSnooze ? this._renderSnoozeMenu(slug as string, snoozeMinutes) : nothing}
+          ${canSnooze ? this._renderSnoozeMenu(slug as string, target, name) : nothing}
         </div>
       </li>
     `;
@@ -777,43 +859,134 @@ export class SwitchboardAlertsCard extends LitElement implements LovelaceCard {
    * A `<details>` disclosure, not a fake button: `<summary>` already has
    * its own role and keyboard behaviour, so overriding it with
    * `role="button"` would strip the expanded/collapsed announcement.
+   *
+   * With `person_picker` on, the same disclosure holds two steps — "who?"
+   * then "how long?" — rather than a second popup, which on a wall
+   * tablet would mean a dialog inside a dialog.
    */
-  private _renderSnoozeMenu(slug: string, snoozeMinutes: number[]): TemplateResult {
+  private _renderSnoozeMenu(
+    slug: string,
+    target: ResolvedAlertTarget,
+    name: string,
+  ): TemplateResult {
     const hass = this.hass;
-    const person = this._config?.person;
-    const labelKey = person
-      ? ("alerts.action.snooze_minutes" as const)
-      : ("alerts.action.snooze_minutes_everyone" as const);
+    const choices = this._personChoices(target.audience);
+    const picking = choices.length > 0 && this._pickedPersons[slug] === undefined;
 
     return html`
-      <div class="snooze-menu">
+      <div class="snooze-menu" data-slug=${slug}>
         <details
           @toggle=${(event: Event) => {
             const details = event.currentTarget as HTMLDetailsElement;
             details
               .querySelector("summary")
               ?.setAttribute("aria-expanded", details.open ? "true" : "false");
+            // Closing the panel forgets the choice, so the next open
+            // always starts at "who?" instead of silently reusing whoever
+            // the last person to touch the tablet was.
+            if (!details.open) {
+              this._forgetPerson(slug);
+            }
           }}
           @keydown=${this._onSnoozeKeydown}
         >
           <summary class="action-button touch-target" aria-expanded="false">
             ${t(hass, "alerts.action.snooze")}
           </summary>
-          <div class="snooze-options" role="menu" aria-label=${t(hass, "alerts.action.snooze")}>
-            ${snoozeMinutes.map(
-              (minutes) => html`
-                <button
-                  class="action-button touch-target"
-                  type="button"
-                  role="menuitem"
-                  @click=${() => this._snooze(slug, minutes)}
-                >
-                  ${t(hass, labelKey, { minutes })}
-                </button>
-              `,
-            )}
-          </div>
+          ${
+            picking
+              ? this._renderPersonPicker(slug, choices, name)
+              : this._renderSnoozeDurations(slug, target, choices.length > 0)
+          }
         </details>
+      </div>
+    `;
+  }
+
+  /** Step 1 of the kiosk picker: who is this snooze for? */
+  private _renderPersonPicker(
+    slug: string,
+    choices: Array<{ entityId: string; name: string }>,
+    name: string,
+  ): TemplateResult {
+    const hass = this.hass;
+    return html`
+      <div
+        class="picker-step"
+        role="group"
+        aria-label=${t(hass, "alerts.picker.prompt_for", { name })}
+        data-slug=${slug}
+      >
+        <span class="picker-prompt wrap-text">${t(hass, "alerts.picker.prompt")}</span>
+        ${choices.map(
+          (choice) => html`
+            <button
+              class="action-button touch-target picker-person"
+              type="button"
+              @click=${() => this._pickPerson(slug, choice.entityId)}
+            >
+              ${choice.name}
+            </button>
+          `,
+        )}
+        <button
+          class="action-button touch-target picker-everyone"
+          type="button"
+          @click=${() => this._pickPerson(slug, "")}
+        >
+          ${t(hass, "alerts.picker.everyone")}
+        </button>
+      </div>
+    `;
+  }
+
+  /** Step 2 (or the only step, without the picker): how long? */
+  private _renderSnoozeDurations(
+    slug: string,
+    target: ResolvedAlertTarget,
+    withPicker: boolean,
+  ): TemplateResult {
+    const snoozeMinutes = target.snoozeMinutes;
+    const hass = this.hass;
+    const person = this._effectivePerson(slug, target.audience);
+    const labelKey = person
+      ? ("alerts.action.snooze_minutes" as const)
+      : ("alerts.action.snooze_minutes_everyone" as const);
+
+    return html`
+      ${
+        withPicker
+          ? html`
+              <div class="picker-chosen">
+                <span class="wrap-text"
+                  >${t(hass, "alerts.picker.chosen", {
+                    name: this._pickedName(slug, target.audience),
+                  })}</span
+                >
+                <button
+                  class="action-button touch-target picker-change"
+                  type="button"
+                  @click=${() => this._forgetPerson(slug)}
+                >
+                  ${t(hass, "alerts.picker.change")}
+                </button>
+              </div>
+            `
+          : nothing
+      }
+      <div class="snooze-options" role="menu" aria-label=${t(hass, "alerts.action.snooze")}>
+        ${snoozeMinutes.map(
+          (minutes) => html`
+            <button
+              class="action-button touch-target"
+              type="button"
+              role="menuitem"
+              @click=${() => this._snooze(slug, minutes, target.audience)}
+            >
+              ${t(hass, labelKey, { minutes })}
+            </button>
+          `,
+        )}
       </div>
     `;
   }
@@ -838,10 +1011,145 @@ export class SwitchboardAlertsCard extends LitElement implements LovelaceCard {
     fireEvent(this, "hass-more-info", { entityId });
   }
 
-  private async _acknowledge(entityId: string, slug: string | undefined): Promise<void> {
+  /** The routing table, when the router publishes one (0.7.0 and up). */
+  private _routingTable(): RoutingTable | undefined {
+    return readRoutingTable(this.hass);
+  }
+
+  /**
+   * The slug, snooze durations and acknowledge permission for one alert:
+   * the card's own options first, then the routing table.
+   */
+  private _resolveTarget(entityId: string): ResolvedAlertTarget {
+    const options: { targetMap?: TargetMap; snoozeMinutes?: number[] } = {};
+    if (this._config?.target_map) options.targetMap = this._config.target_map;
+    if (this._config?.snooze_minutes) options.snoozeMinutes = this._config.snooze_minutes;
+    return resolveAlertTarget(entityId, options, this._routingTable());
+  }
+
+  /**
+   * The persons the picker offers for one target. Empty — so the picker
+   * never appears — unless the option is on *and* the routing table names
+   * somebody **in that target's audience**: a chooser with nothing to
+   * choose is worse than no chooser, and a name the router would refuse
+   * (`person_not_in_audience`) is worse still.
+   */
+  private _personChoices(audience?: string[] | undefined): Array<{
+    entityId: string;
+    name: string;
+  }> {
+    if (!this._config?.person_picker) {
+      return [];
+    }
+    return personChoices(this._routingTable(), this.hass, audience);
+  }
+
+  /**
+   * Who a snooze on this target is for: the picker's choice when one was
+   * made, the card's `person` option otherwise. An empty string is the
+   * picker's explicit "everyone", and stays empty.
+   *
+   * The option is dropped when the routing table names an audience this
+   * person is not in: `notify_switchboard.snooze` refuses that call
+   * (`person_not_in_audience`) and raises a repairs issue, so the card
+   * snoozes for the whole audience instead — which is something the
+   * router will actually do, and which the menu's own label then
+   * announces ("Snooze for everyone · 15 min"). The picker's choices are
+   * already narrowed to the audience, so a name the router would refuse
+   * is never sent by either path. With no row derived — `audience`
+   * `undefined` — nothing is known to contradict the option and it is
+   * sent as it always was.
+   */
+  private _effectivePerson(slug: string, audience: string[] | undefined): string | undefined {
+    const picked = this._pickedPersons[slug];
+    if (picked !== undefined) {
+      return picked === "" ? undefined : picked;
+    }
+    const configured = this._config?.person;
+    if (configured === undefined || (audience !== undefined && !audience.includes(configured))) {
+      return undefined;
+    }
+    return configured;
+  }
+
+  private _pickedName(slug: string, audience: string[] | undefined): string {
+    const picked = this._pickedPersons[slug];
+    if (!picked) {
+      return t(this.hass, "alerts.picker.everyone");
+    }
+    return (
+      this._personChoices(audience).find((choice) => choice.entityId === picked)?.name ?? picked
+    );
+  }
+
+  private _pickPerson(slug: string, personEntityId: string): void {
+    this._pickedPersons = { ...this._pickedPersons, [slug]: personEntityId };
+    // The button that was just activated is gone from the DOM; without
+    // this, focus falls back to the document and a keyboard or
+    // switch-control user has to tab in from the top of the card again.
+    this._focusAfterPick(slug, ".snooze-options button");
+  }
+
+  private _forgetPerson(slug: string): void {
+    if (this._pickedPersons[slug] === undefined) {
+      return;
+    }
+    const next = { ...this._pickedPersons };
+    delete next[slug];
+    this._pickedPersons = next;
+    this._focusAfterPick(slug, ".picker-step button");
+  }
+
+  /** Moves focus to the first control of the step that just replaced another. */
+  private _focusAfterPick(slug: string, selector: string): void {
+    void this.updateComplete.then(() => {
+      this._menuFor(slug)?.querySelector<HTMLElement>(selector)?.focus();
+    });
+  }
+
+  private _menuFor(slug: string): HTMLElement | undefined {
+    return Array.from(this.renderRoot.querySelectorAll<HTMLElement>(".snooze-menu")).find(
+      (element) => element.dataset.slug === slug,
+    );
+  }
+
+  /**
+   * Collapses one row's disclosure once its snooze is on its way. Leaving
+   * it open would sit there claiming an action the user has already taken,
+   * and on a wall tablet the next person would find somebody else's
+   * half-used menu. The choice is dropped first — without
+   * `_forgetPerson`'s focus move, which would land inside a panel that is
+   * about to close — so the reopened menu starts at "who?" again, and
+   * focus goes back to the summary the user actually pressed.
+   */
+  private _closeSnoozeMenu(slug: string): void {
+    if (this._pickedPersons[slug] !== undefined) {
+      const next = { ...this._pickedPersons };
+      delete next[slug];
+      this._pickedPersons = next;
+    }
+    const details = this._menuFor(slug)?.querySelector("details");
+    const summary = details?.querySelector<HTMLElement>("summary");
+    if (details) {
+      details.open = false;
+    }
+    summary?.setAttribute("aria-expanded", "false");
+    void this.updateComplete.then(() => {
+      summary?.focus();
+    });
+  }
+
+  /**
+   * `notify_switchboard.acknowledge` is only called when the target is
+   * known *and* accepts an acknowledgement: since router 0.7.0 the routing
+   * table publishes `allow_acknowledge`, and a target that says `false`
+   * would have the call refused and logged. Falling back to the native
+   * `alert.turn_off` — the 0.1.x path — actually clears the alert.
+   */
+  private async _acknowledge(entityId: string, target: ResolvedAlertTarget): Promise<void> {
     if (!this.hass) return;
-    if (slug && hasRouterService(this.hass, "acknowledge")) {
-      await this.hass.callService("notify_switchboard", "acknowledge", { target: slug });
+    if (target.slug && target.allowAcknowledge && hasRouterService(this.hass, "acknowledge")) {
+      await this.hass.callService("notify_switchboard", "acknowledge", { target: target.slug });
       return;
     }
     await this.hass.callService("alert", "turn_off", { entity_id: entityId });
@@ -856,14 +1164,20 @@ export class SwitchboardAlertsCard extends LitElement implements LovelaceCard {
    * Without `person`, `notify_switchboard.snooze` snoozes the target for
    * the whole audience — which is what the menu label says it will do.
    */
-  private async _snooze(slug: string, minutes: number): Promise<void> {
+  private async _snooze(
+    slug: string,
+    minutes: number,
+    audience: string[] | undefined,
+  ): Promise<void> {
     if (!this.hass) return;
-    const person = this._config?.person;
+    const person = this._effectivePerson(slug, audience);
     const data: Record<string, unknown> = { target: slug, minutes };
     if (person) {
       data.person = person;
     }
-    await this.hass.callService("notify_switchboard", "snooze", data);
+    const call = this.hass.callService("notify_switchboard", "snooze", data);
+    this._closeSnoozeMenu(slug);
+    await call;
   }
 }
 

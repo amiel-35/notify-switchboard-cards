@@ -7,13 +7,15 @@ import type {
   LovelaceCardEditor,
 } from "../../ha-types";
 import type { SwitchboardAlertsCardConfig } from "../../types";
-import { DEFAULT_SNOOZE_MINUTES } from "../../types";
 import { sharedStyles } from "../../styles/shared-styles";
 import { fireEvent } from "../../utils/fire-event";
 import { t, type TranslationKey } from "../../i18n";
 import { isHaFormAvailable, prune } from "../../utils/editor-form";
 
 const SNOOZE_PRESETS = ["5", "15", "30", "60", "120", "480"];
+
+/** Options that `sensor.switchboard_routing_table` fills in when left empty. */
+const DERIVED_SINCE_0_7_0 = new Set(["target_map", "snooze_minutes"]);
 
 /**
  * Visual editor built on `ha-form`. `ha-form` and `ha-selector` are runtime
@@ -62,6 +64,7 @@ export class SwitchboardAlertsCardEditor extends LitElement implements LovelaceC
       },
       { name: "show_acknowledged", selector: { boolean: {} } },
       { name: "person", selector: { entity: { domain: "person" } } },
+      { name: "person_picker", selector: { boolean: {} } },
       {
         name: "snooze_minutes",
         selector: { select: { multiple: true, custom_value: true, options: SNOOZE_PRESETS } },
@@ -70,17 +73,33 @@ export class SwitchboardAlertsCardEditor extends LitElement implements LovelaceC
     ];
   }
 
-  /** `snooze_minutes` is numbers in YAML but strings in the select selector. */
+  /**
+   * `snooze_minutes` is numbers in YAML but strings in the select selector.
+   *
+   * The field is shown **empty** when the config carries no
+   * `snooze_minutes`, rather than pre-filled with the built-in defaults:
+   * since router 0.7.0 an empty field means "use each target's own
+   * durations", and pre-filling it would turn every card the editor
+   * touches into a permanent override of the routing table.
+   */
   private _data(): Record<string, unknown> {
     const config = this._config ?? ({} as SwitchboardAlertsCardConfig);
     return {
       ...config,
-      snooze_minutes: (config.snooze_minutes ?? DEFAULT_SNOOZE_MINUTES).map(String),
+      snooze_minutes: (config.snooze_minutes ?? []).map(String),
     };
   }
 
   private _computeLabel = (schema: { name: string }): string =>
     t(this.hass, `editor.${schema.name}` as TranslationKey);
+
+  /**
+   * The helper line under the two options router 0.7.0 made optional.
+   * `ha-form` renders whatever `computeHelper` returns under the field and
+   * skips an empty string, so the other fields stay unadorned.
+   */
+  private _computeHelper = (schema: { name: string }): string =>
+    DERIVED_SINCE_0_7_0.has(schema.name) ? t(this.hass, "editor.derived_since_0_7_0") : "";
 
   private _valueChanged = (event: CustomEvent<HaFormValueChangedDetail>): void => {
     event.stopPropagation();
@@ -116,6 +135,7 @@ export class SwitchboardAlertsCardEditor extends LitElement implements LovelaceC
         .data=${this._data()}
         .schema=${this._schema()}
         .computeLabel=${this._computeLabel}
+        .computeHelper=${this._computeHelper}
         @value-changed=${this._valueChanged}
       ></ha-form>
     `;

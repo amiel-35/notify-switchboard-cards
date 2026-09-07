@@ -5,6 +5,7 @@ export const es: Record<TranslationKey, string> = {
   "alerts.empty": "Sin alertas activas",
   "alerts.state.active": "Activa",
   "alerts.state.acknowledged": "Reconocida",
+  "alerts.acknowledged_by": "Reconocida por {name}",
   "alerts.state.unavailable": "No disponible",
   "alerts.action.acknowledge": "Reconocer",
   "alerts.action.unacknowledge": "Deshacer reconocimiento",
@@ -12,6 +13,11 @@ export const es: Record<TranslationKey, string> = {
   "alerts.action.snooze_minutes": "Posponer {minutes} min",
   "alerts.action.snooze_minutes_everyone": "Posponer para todos · {minutes} min",
   "alerts.action.more_info": "Mostrar detalles de {name}",
+  "alerts.picker.prompt": "¿Posponer para quién?",
+  "alerts.picker.prompt_for": "¿Posponer {name} para quién?",
+  "alerts.picker.everyone": "Todos",
+  "alerts.picker.chosen": "Para: {name}",
+  "alerts.picker.change": "Cambiar",
   "alerts.dialog.close": "Cerrar",
   "alerts.badge.label":
     "{active} activa(s), {acknowledged} reconocida(s), {unavailable} no disponible(s)",
@@ -48,7 +54,10 @@ export const es: Record<TranslationKey, string> = {
   "editor.target_map": "Mapa de objetivos (alert.entity_id: slug)",
   "editor.snooze_minutes": "Duraciones de aplazamiento (minutos)",
   "editor.person": "Entidad de persona",
+  "editor.person_picker": "Preguntar para quién es el aplazamiento (quiosco)",
   "editor.wake_time": "Hora de despertar (HH:MM)",
+  "editor.derived_since_0_7_0":
+    "Opcional desde Notify Switchboard 0.7.0: se deduce de sensor.switchboard_routing_table si se deja vacío.",
   "editor.form_unavailable":
     "El editor de formularios de Home Assistant (ha-form) no está disponible aquí. Edita esta tarjeta en YAML.",
 };

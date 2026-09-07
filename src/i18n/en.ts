@@ -3,6 +3,7 @@ export const en = {
   "alerts.empty": "No active alerts",
   "alerts.state.active": "Active",
   "alerts.state.acknowledged": "Acknowledged",
+  "alerts.acknowledged_by": "Acknowledged by {name}",
   "alerts.state.unavailable": "Unavailable",
   "alerts.action.acknowledge": "Acknowledge",
   "alerts.action.unacknowledge": "Un-acknowledge",
@@ -10,6 +11,11 @@ export const en = {
   "alerts.action.snooze_minutes": "Snooze {minutes} min",
   "alerts.action.snooze_minutes_everyone": "Snooze for everyone · {minutes} min",
   "alerts.action.more_info": "Show details for {name}",
+  "alerts.picker.prompt": "Snooze for whom?",
+  "alerts.picker.prompt_for": "Snooze {name} for whom?",
+  "alerts.picker.everyone": "Everyone",
+  "alerts.picker.chosen": "For: {name}",
+  "alerts.picker.change": "Change",
   "alerts.dialog.close": "Close",
   "alerts.badge.label": "{active} active, {acknowledged} acknowledged, {unavailable} unavailable",
   "alerts.badge.active": "{count} active",
@@ -45,7 +51,10 @@ export const en = {
   "editor.target_map": "Target map (alert.entity_id: slug)",
   "editor.snooze_minutes": "Snooze durations (minutes)",
   "editor.person": "Person entity",
+  "editor.person_picker": "Ask who a snooze is for (kiosk)",
   "editor.wake_time": "Wake time (HH:MM)",
+  "editor.derived_since_0_7_0":
+    "Optional since Notify Switchboard 0.7.0: derived from sensor.switchboard_routing_table when left empty.",
   "editor.form_unavailable":
     "The Home Assistant form editor (ha-form) is not available here. Edit this card in YAML instead.",
 };
