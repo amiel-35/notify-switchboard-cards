@@ -116,7 +116,7 @@ function parsePerson(raw: unknown): RoutingTablePerson | undefined {
 /**
  * Reads the routing table entity, or returns `undefined` when the router
  * does not publish it (below 0.7.0), when it is `unavailable` / `unknown`
- * (a reload in flight), or when neither attribute is a list. The caller
+ * (a reload in flight), or when `targets` is not a list. The caller
  * then falls back to the card's own options, unchanged.
  */
 export function readRoutingTable(hass: HomeAssistant | undefined): RoutingTable | undefined {
@@ -126,10 +126,13 @@ export function readRoutingTable(hass: HomeAssistant | undefined): RoutingTable 
   }
   const rawTargets = stateObj.attributes.targets;
   const rawPersons = stateObj.attributes.persons;
-  if (!Array.isArray(rawTargets) && !Array.isArray(rawPersons)) {
+  // `targets` is the half every derivation rests on, so it is what makes
+  // a payload a routing table: persons alone would have the cards report
+  // an empty target list as if the router had published one.
+  if (!Array.isArray(rawTargets)) {
     return undefined;
   }
-  const targets = (Array.isArray(rawTargets) ? rawTargets : [])
+  const targets = rawTargets
     .map(parseTarget)
     .filter((target): target is RoutingTableTarget => target !== undefined);
   const persons = (Array.isArray(rawPersons) ? rawPersons : [])

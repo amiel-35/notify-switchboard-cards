@@ -59,6 +59,17 @@ describe("readRoutingTable", () => {
     expect(readRoutingTable(hass)).toBeUndefined();
   });
 
+  it("returns undefined when `targets` is not a list, persons or no persons", () => {
+    // `targets` is the half every derivation rests on: a payload without
+    // it is not a routing table the cards can read, whatever else it
+    // carries, and pretending otherwise would publish an empty target
+    // list as if the router had said "no targets".
+    const hass = createFakeHass({
+      states: [routingTableEntity({ persons: PERSONS })],
+    });
+    expect(readRoutingTable(hass)).toBeUndefined();
+  });
+
   it("parses both closed lists, keeping null alert_entity as null", () => {
     const hass = createFakeHass({
       states: [routingTableEntity({ targets: TARGETS, persons: PERSONS })],

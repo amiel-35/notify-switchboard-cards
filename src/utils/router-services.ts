@@ -56,10 +56,11 @@ export interface ResolvedAlertTarget {
    */
   allowAcknowledge: boolean;
   /**
-   * The durations to offer: the card's options first, then the target's
-   * own list — **empty included**, which is the router saying snooze is
-   * off for this target — and the built-in default only when no row was
-   * derived at all.
+   * The durations to offer: the target's own list — **empty included**,
+   * which is the router saying snooze is off for this target — narrowed
+   * by the card's options when it sets any; the card's options alone when
+   * the table describes no row for this slug; and the built-in default
+   * when neither says anything.
    */
   snoozeMinutes: number[];
   /**
@@ -90,13 +91,26 @@ export function resolveAlertTarget(
    * offer none. The built-in default therefore applies only when no row
    * was derived at all — the 0.1.x path, where the card is the only
    * source of durations.
+   *
+   * For the same reason the card's own `snooze_minutes` is a filter, not
+   * an escape hatch: where the table describes the very slug the card
+   * will call, an override can only narrow that row's list, and an empty
+   * intersection is a snooze menu with nothing left to offer — the card
+   * hides it rather than showing buttons the router would refuse.
    */
-  const snoozeMinutes =
-    options.snoozeMinutes && options.snoozeMinutes.length > 0
-      ? options.snoozeMinutes
-      : row
-        ? row.snoozeMinutes
-        : DEFAULT_SNOOZE_MINUTES;
+  const rowForSlug = row && row.slug === slug ? row : undefined;
+  const overrides =
+    options.snoozeMinutes && options.snoozeMinutes.length > 0 ? options.snoozeMinutes : undefined;
+  const snoozeMinutes = overrides
+    ? // Without a row for this slug — an older router, or a `target_map`
+      // naming a target it does not publish — the override is the sole
+      // source, exactly as in 0.1.x.
+      rowForSlug
+      ? overrides.filter((minutes) => rowForSlug.snoozeMinutes.includes(minutes))
+      : overrides
+    : row
+      ? row.snoozeMinutes
+      : DEFAULT_SNOOZE_MINUTES;
 
   return {
     slug,

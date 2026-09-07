@@ -103,14 +103,45 @@ describe("resolveAlertTarget", () => {
   it("lets the card's own options override the routing table", () => {
     const resolved = resolveAlertTarget(
       "alert.leak_kitchen",
-      { targetMap: { "alert.leak_kitchen": "doorbell" }, snoozeMinutes: [45] },
+      { targetMap: { "alert.leak_kitchen": "doorbell" }, snoozeMinutes: [5, 45] },
       table,
     );
     expect(resolved.slug).toBe("doorbell");
     expect(resolved.source).toBe("config");
-    expect(resolved.snoozeMinutes).toEqual([45]);
+    // Narrowed to what that target actually offers: 45 is not in its list.
+    expect(resolved.snoozeMinutes).toEqual([5]);
     // The overridden slug still carries that target's own permission.
     expect(resolved.allowAcknowledge).toBe(false);
+  });
+
+  it("narrows the card's durations to the row's own list, keeping the card's order", () => {
+    // `notify_switchboard.snooze` refuses any duration outside the row's
+    // `snooze_minutes` (`snooze_minutes_not_offered`), so an override can
+    // only ever narrow that list — never add to it.
+    expect(
+      resolveAlertTarget("alert.leak_kitchen", { snoozeMinutes: [30, 45, 10] }, table)
+        .snoozeMinutes,
+    ).toEqual([30, 10]);
+  });
+
+  it("offers nothing when the card's durations and the row's list do not meet", () => {
+    expect(
+      resolveAlertTarget("alert.leak_kitchen", { snoozeMinutes: [45] }, table).snoozeMinutes,
+    ).toEqual([]);
+  });
+
+  it("keeps the card's durations whole for a slug the table does not publish", () => {
+    // A `target_map` naming a target the router does not describe is the
+    // 0.1.x path: the card's options are the only source of durations,
+    // and the row derived from the alert entity says nothing about the
+    // slug that will actually be called.
+    const resolved = resolveAlertTarget(
+      "alert.leak_kitchen",
+      { targetMap: { "alert.leak_kitchen": "leak_override" }, snoozeMinutes: [45] },
+      table,
+    );
+    expect(resolved.slug).toBe("leak_override");
+    expect(resolved.snoozeMinutes).toEqual([45]);
   });
 
   it("behaves exactly like 0.1.x with no routing table", () => {
@@ -148,10 +179,12 @@ describe("resolveAlertTarget", () => {
     expect(resolveAlertTarget("alert.silent", {}, table).snoozeMinutes).toEqual([]);
   });
 
-  it("still lets the card's own durations override an empty router list", () => {
+  it("offers nothing on an empty router list, whatever the card asks for", () => {
+    // "Snooze is off for this target" is the router's answer, not a gap
+    // the card may fill: every duration it offered would be refused.
     expect(
       resolveAlertTarget("alert.silent", { snoozeMinutes: [45] }, table).snoozeMinutes,
-    ).toEqual([45]);
+    ).toEqual([]);
   });
 
   it("refuses acknowledgement for a row with no alert entity, whatever it allows", () => {

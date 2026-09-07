@@ -812,7 +812,11 @@ describe("switchboard-alerts-card options derived from the routing table", () =>
     expect(card.shadowRoot?.querySelector(".snooze-menu")).toBeNull();
   });
 
-  it("still offers the card's own durations over an empty router list", async () => {
+  it("hides the menu when the card's durations meet an empty router list", async () => {
+    // The card's own `snooze_minutes` cannot re-open a target the router
+    // has closed: `notify_switchboard.snooze` refuses every duration that
+    // is not in the row's list, so the intersection is empty and there is
+    // nothing left to offer.
     const hass = createFakeHass({
       states: [
         fakeEntity("alert.leak", "on"),
@@ -826,8 +830,28 @@ describe("switchboard-alerts-card options derived from the routing table", () =>
     );
     cards.push(card);
 
-    expect(card.shadowRoot?.querySelector(".snooze-menu")).not.toBeNull();
-    expect(buttonWithText(card, "Snooze for everyone · 45 min")).toBeDefined();
+    expect(card.shadowRoot?.querySelector(".snooze-menu")).toBeNull();
+  });
+
+  it("narrows the card's durations to the ones the router would accept", async () => {
+    const hass = createFakeHass({
+      states: [fakeEntity("alert.leak", "on"), routingTable([LEAK_TARGET])],
+      services: { notify_switchboard: { snooze: {} } },
+    });
+    const card = await mountCard(
+      // 30 is in the target's [10, 30]; 45 is not and would be refused.
+      { type: "custom:switchboard-alerts-card", mode: "full", snooze_minutes: [30, 45] },
+      hass,
+    );
+    cards.push(card);
+
+    expect(buttonWithText(card, "Snooze for everyone · 45 min")).toBeUndefined();
+    buttonWithText(card, "Snooze for everyone · 30 min")?.click();
+    await card.updateComplete;
+    expect(hass.callService).toHaveBeenCalledWith("notify_switchboard", "snooze", {
+      target: "leak",
+      minutes: 30,
+    });
   });
 
   it("re-renders when the routing table changes", async () => {
@@ -1194,5 +1218,100 @@ describe("switchboard-alerts-card kiosk person picker", () => {
     await card.updateComplete;
 
     expect(card.shadowRoot?.querySelector(".picker-step")).not.toBeNull();
+  });
+});
+
+describe("switchboard-alerts-card configured person against the audience", () => {
+  let cards: SwitchboardAlertsCard[] = [];
+
+  afterEach(() => {
+    for (const card of cards) card.remove();
+    cards = [];
+  });
+
+  /** The routing table's own audience for `leak`: Alice, Bob, a speaker. */
+  const audienceHass = (audience?: string[]) =>
+    createFakeHass({
+      states: [
+        fakeEntity("alert.leak", "on"),
+        routingTable([{ ...LEAK_TARGET, snooze_minutes: [15], ...(audience ? { audience } : {}) }]),
+      ],
+      services: { notify_switchboard: { snooze: {} } },
+    });
+
+  it("sends the configured person when the target's audience holds them", async () => {
+    const hass = audienceHass();
+    const card = await mountCard(
+      {
+        type: "custom:switchboard-alerts-card",
+        mode: "full",
+        person: "person.alice",
+      },
+      hass,
+    );
+    cards.push(card);
+
+    buttonWithText(card, "Snooze 15 min")?.click();
+    await card.updateComplete;
+    expect(hass.callService).toHaveBeenCalledWith("notify_switchboard", "snooze", {
+      target: "leak",
+      minutes: 15,
+      person: "person.alice",
+    });
+  });
+
+  it("snoozes for everyone instead of sending a person the router would refuse", async () => {
+    // Carol is not in this target's audience: `notify_switchboard.snooze`
+    // would refuse the call (`person_not_in_audience`) and raise a
+    // repairs issue. The audience-wide snooze is the honest fallback —
+    // and the menu stays, because it still does something.
+    const hass = audienceHass(["person.alice"]);
+    const card = await mountCard(
+      {
+        type: "custom:switchboard-alerts-card",
+        mode: "full",
+        person: "person.carol",
+      },
+      hass,
+    );
+    cards.push(card);
+
+    expect(card.shadowRoot?.querySelector(".snooze-menu")).not.toBeNull();
+    // The label says what will happen, not what the option asked for.
+    const option = buttonWithText(card, "Snooze for everyone · 15 min");
+    expect(option).toBeDefined();
+
+    option?.click();
+    await card.updateComplete;
+    expect(hass.callService).toHaveBeenCalledWith("notify_switchboard", "snooze", {
+      target: "leak",
+      minutes: 15,
+    });
+  });
+
+  it("keeps sending the configured person when no row was derived (0.1.x)", async () => {
+    const hass = createFakeHass({
+      states: [fakeEntity("alert.leak", "on")],
+      services: { notify_switchboard: { snooze: {} } },
+    });
+    const card = await mountCard(
+      {
+        type: "custom:switchboard-alerts-card",
+        mode: "full",
+        target_map: { "alert.leak": "leak" },
+        snooze_minutes: [15],
+        person: "person.carol",
+      },
+      hass,
+    );
+    cards.push(card);
+
+    buttonWithText(card, "Snooze 15 min")?.click();
+    await card.updateComplete;
+    expect(hass.callService).toHaveBeenCalledWith("notify_switchboard", "snooze", {
+      target: "leak",
+      minutes: 15,
+      person: "person.carol",
+    });
   });
 });

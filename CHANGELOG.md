@@ -49,6 +49,12 @@ older router every 0.1.x behaviour is unchanged.
   row's audience and raises a `repairs` issue when a card keeps asking, so
   a name the router would refuse is never offered; an audience whose
   entries are all bare `notify.*` outputs shows no picker at all.
+- The `person` option is held to that same audience: when the routing
+  table's row for a target does not name the configured person, the card
+  snoozes for the whole audience — the label saying so — instead of
+  sending a name the router would refuse. The menu stays; only the person
+  is dropped. With no row derived (an older router), the option is sent
+  exactly as before.
 - A target the routing table publishes with an empty `snooze_minutes` has
   snooze switched off — the router accepts no duration for it — and the
   card now hides its snooze menu instead of falling back to the built-in
@@ -57,6 +63,13 @@ older router every 0.1.x behaviour is unchanged.
   that alert. **If your card still carries `snooze_minutes: [15, 60, 480]`
   from the 0.1.x editor, delete the option** to pick up each target's own
   durations.
+- Where the routing table describes the target the card will call, a
+  `snooze_minutes` override now **narrows** that target's own list rather
+  than replacing it: the router refuses any duration it does not offer, so
+  only the durations both agree on are shown, and none at all when they
+  agree on none. A `target_map` naming a target the router does not
+  publish keeps the override whole — the 0.1.x path, where the card is the
+  only source of durations.
 - Picking a snooze duration now closes that row's menu and returns focus
   to its Snooze button, instead of leaving an open panel offering an
   action already taken.

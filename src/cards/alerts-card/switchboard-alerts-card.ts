@@ -948,7 +948,7 @@ export class SwitchboardAlertsCard extends LitElement implements LovelaceCard {
   ): TemplateResult {
     const snoozeMinutes = target.snoozeMinutes;
     const hass = this.hass;
-    const person = this._effectivePerson(slug);
+    const person = this._effectivePerson(slug, target.audience);
     const labelKey = person
       ? ("alerts.action.snooze_minutes" as const)
       : ("alerts.action.snooze_minutes_everyone" as const);
@@ -981,7 +981,7 @@ export class SwitchboardAlertsCard extends LitElement implements LovelaceCard {
               class="action-button touch-target"
               type="button"
               role="menuitem"
-              @click=${() => this._snooze(slug, minutes)}
+              @click=${() => this._snooze(slug, minutes, target.audience)}
             >
               ${t(hass, labelKey, { minutes })}
             </button>
@@ -1048,13 +1048,28 @@ export class SwitchboardAlertsCard extends LitElement implements LovelaceCard {
    * Who a snooze on this target is for: the picker's choice when one was
    * made, the card's `person` option otherwise. An empty string is the
    * picker's explicit "everyone", and stays empty.
+   *
+   * The option is dropped when the routing table names an audience this
+   * person is not in: `notify_switchboard.snooze` refuses that call
+   * (`person_not_in_audience`) and raises a repairs issue, so the card
+   * snoozes for the whole audience instead — which is something the
+   * router will actually do, and which the menu's own label then
+   * announces ("Snooze for everyone · 15 min"). The picker's choices are
+   * already narrowed to the audience, so a name the router would refuse
+   * is never sent by either path. With no row derived — `audience`
+   * `undefined` — nothing is known to contradict the option and it is
+   * sent as it always was.
    */
-  private _effectivePerson(slug: string): string | undefined {
+  private _effectivePerson(slug: string, audience: string[] | undefined): string | undefined {
     const picked = this._pickedPersons[slug];
     if (picked !== undefined) {
       return picked === "" ? undefined : picked;
     }
-    return this._config?.person;
+    const configured = this._config?.person;
+    if (configured === undefined || (audience !== undefined && !audience.includes(configured))) {
+      return undefined;
+    }
+    return configured;
   }
 
   private _pickedName(slug: string, audience: string[] | undefined): string {
@@ -1149,9 +1164,13 @@ export class SwitchboardAlertsCard extends LitElement implements LovelaceCard {
    * Without `person`, `notify_switchboard.snooze` snoozes the target for
    * the whole audience — which is what the menu label says it will do.
    */
-  private async _snooze(slug: string, minutes: number): Promise<void> {
+  private async _snooze(
+    slug: string,
+    minutes: number,
+    audience: string[] | undefined,
+  ): Promise<void> {
     if (!this.hass) return;
-    const person = this._effectivePerson(slug);
+    const person = this._effectivePerson(slug, audience);
     const data: Record<string, unknown> = { target: slug, minutes };
     if (person) {
       data.person = person;

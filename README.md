@@ -154,13 +154,23 @@ person_picker: false
   `[15, 60, 480]` only when the routing table holds no row for that alert.
   Set, it applies to every target on the card — so if your card already
   carries `snooze_minutes: [15, 60, 480]` from the 0.1.x editor, **delete
-  the option** to pick up each target's own durations instead. A target
-  the routing table publishes with an empty `snooze_minutes` has snooze
-  switched off: the router refuses every duration for it, so the card
-  shows no snooze menu on that alert at all.
+  the option** to pick up each target's own durations instead. Where the
+  routing table describes the target, the option can only **narrow** that
+  target's own list: the router refuses any duration it does not offer
+  (`snooze_minutes_not_offered`), so a duration the router would refuse is
+  never shown. A target the routing table publishes with an empty
+  `snooze_minutes` has snooze switched off entirely, and the card shows no
+  snooze menu on that alert at all — nor does one appear when the option
+  and the target's list have no duration in common.
 - `person` — optional `person.*` entity the snooze applies to. **Without
   it, `notify_switchboard.snooze` snoozes the target for the whole
-  audience**, and the menu says so ("Snooze for everyone · 15 min").
+  audience**, and the menu says so ("Snooze for everyone · 15 min"). The
+  option is also dropped, and that audience-wide snooze used instead,
+  when the routing table's audience for that target does not name this
+  person: the router would refuse the call (`person_not_in_audience`), so
+  **a name the router would refuse is never sent** — by this option or by
+  the picker below. The menu stays: an audience-wide snooze is still
+  worth offering, and its label says which one it is.
 - `person_picker` — `true` turns Snooze into two steps on the card
   itself: who, then how long. The chooser lists the persons the routing
   table publishes (named from their `person.*` state) plus an explicit
