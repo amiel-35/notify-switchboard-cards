@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import "../src/cards/silence-tile/switchboard-silence-tile";
 import type { SwitchboardSilenceTile } from "../src/cards/silence-tile/switchboard-silence-tile";
 import type { SwitchboardSilenceTileConfig } from "../src/types";
+import { ROUTING_TABLE_ENTITY } from "../src/types";
 import { createFakeHass, fakeEntity, withUpdatedStates } from "./fake-hass";
 
 async function mountTile(
@@ -273,5 +274,112 @@ describe("switchboard-silence-tile shouldUpdate", () => {
     tile.hass = withUpdatedStates(tile.hass, fakeEntity("binary_sensor.alice_silenced", "on"));
     await tile.updateComplete;
     expect(renderSpy).toHaveBeenCalled();
+  });
+});
+
+describe("switchboard-silence-tile wake time derived from the routing table", () => {
+  let tiles: SwitchboardSilenceTile[] = [];
+
+  afterEach(() => {
+    for (const tile of tiles) tile.remove();
+    tiles = [];
+    vi.useRealTimers();
+  });
+
+  function routingTable(persons: Array<Record<string, unknown>>) {
+    return fakeEntity(ROUTING_TABLE_ENTITY, "0", { attributes: { targets: [], persons } });
+  }
+
+  /** "Until wake" silences for exactly this many minutes. */
+  async function untilWakeMinutes(
+    config: SwitchboardSilenceTileConfig,
+    states: ReturnType<typeof fakeEntity>[],
+  ): Promise<number | undefined> {
+    const hass = createFakeHass({
+      states,
+      services: { notify_switchboard: { silence: {}, unsnooze: {}, unsilence: {} } },
+      timeZone: "UTC",
+    });
+    const tile = await mountTile(config, hass);
+    tiles.push(tile);
+
+    buttonWithText(tile, "Until wake")?.click();
+    await tile.updateComplete;
+
+    const call = vi.mocked(hass.callService).mock.calls.at(-1);
+    return (call?.[2] as { minutes?: number } | undefined)?.minutes;
+  }
+
+  it("uses this person's wake_time from the router, converted from HH:MM:SS", async () => {
+    // 00:00 UTC -> 06:45 is 405 minutes away; the built-in 07:00 would be 420.
+    vi.useFakeTimers().setSystemTime(new Date("2026-09-07T00:00:00Z"));
+    const minutes = await untilWakeMinutes(
+      { type: "custom:switchboard-silence-tile", person: "person.alice" },
+      [
+        fakeEntity("person.alice", "home"),
+        routingTable([{ entity_id: "person.alice", wake_time: "06:45:00", summary: true }]),
+      ],
+    );
+    expect(minutes).toBe(405);
+  });
+
+  it("lets the card's own wake_time override the router", async () => {
+    vi.useFakeTimers().setSystemTime(new Date("2026-09-07T00:00:00Z"));
+    const minutes = await untilWakeMinutes(
+      { type: "custom:switchboard-silence-tile", person: "person.alice", wake_time: "08:00" },
+      [
+        fakeEntity("person.alice", "home"),
+        routingTable([{ entity_id: "person.alice", wake_time: "06:45:00", summary: true }]),
+      ],
+    );
+    expect(minutes).toBe(480);
+  });
+
+  it("falls back to 07:00 for a person the router gives no wake time", async () => {
+    vi.useFakeTimers().setSystemTime(new Date("2026-09-07T00:00:00Z"));
+    const minutes = await untilWakeMinutes(
+      { type: "custom:switchboard-silence-tile", person: "person.alice" },
+      [
+        fakeEntity("person.alice", "home"),
+        routingTable([{ entity_id: "person.alice", wake_time: null, summary: true }]),
+      ],
+    );
+    expect(minutes).toBe(420);
+  });
+
+  it("falls back to 07:00 with no routing table at all (router < 0.7.0)", async () => {
+    vi.useFakeTimers().setSystemTime(new Date("2026-09-07T00:00:00Z"));
+    const minutes = await untilWakeMinutes(
+      { type: "custom:switchboard-silence-tile", person: "person.alice" },
+      [fakeEntity("person.alice", "home")],
+    );
+    expect(minutes).toBe(420);
+  });
+
+  it("re-renders when the routing table changes", async () => {
+    const hass = createFakeHass({
+      states: [fakeEntity("person.alice", "home")],
+      services: { notify_switchboard: { silence: {}, unsnooze: {}, unsilence: {} } },
+      timeZone: "UTC",
+    });
+    const tile = await mountTile(
+      { type: "custom:switchboard-silence-tile", person: "person.alice" },
+      hass,
+    );
+    tiles.push(tile);
+
+    vi.useFakeTimers().setSystemTime(new Date("2026-09-07T00:00:00Z"));
+    tile.hass = withUpdatedStates(
+      hass,
+      routingTable([{ entity_id: "person.alice", wake_time: "06:45:00", summary: true }]),
+    );
+    await tile.updateComplete;
+
+    buttonWithText(tile, "Until wake")?.click();
+    await tile.updateComplete;
+    expect(hass.callService).toHaveBeenCalledWith("notify_switchboard", "silence", {
+      person: "person.alice",
+      minutes: 405,
+    });
   });
 });

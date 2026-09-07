@@ -72,6 +72,7 @@ describe("switchboard-alerts-card-editor", () => {
     expect(byName.person).toEqual({ entity: { domain: "person" } });
     expect(byName.target_map).toEqual({ object: {} });
     expect(byName.show_acknowledged).toEqual({ boolean: {} });
+    expect(byName.person_picker).toEqual({ boolean: {} });
     expect(Object.keys(byName.mode as Record<string, unknown>)).toEqual(["select"]);
   });
 
@@ -85,6 +86,37 @@ describe("switchboard-alerts-card-editor", () => {
     };
     expect(form.computeLabel?.({ name: "person" })).toBe("Person entity");
     expect(form.computeLabel?.({ name: "mode" })).toBe("Mode");
+    expect(form.computeLabel?.({ name: "person_picker" })).toBe("Ask who a snooze is for (kiosk)");
+  });
+
+  it("marks the options router 0.7.0 derives as optional, and only those", async () => {
+    const editor = await mountEditor<SwitchboardAlertsCardEditor>(
+      "switchboard-alerts-card-editor",
+      base,
+    );
+    const form = editor.shadowRoot?.querySelector("ha-form") as HTMLElement & {
+      computeHelper?: (schema: { name: string }) => string;
+    };
+    for (const name of ["target_map", "snooze_minutes"]) {
+      expect(form.computeHelper?.({ name })).toMatch(/Optional since Notify Switchboard 0\.7\.0/);
+      expect(form.computeHelper?.({ name })).toMatch(/sensor\.switchboard_routing_table/);
+    }
+    for (const name of ["title", "entities", "mode", "person", "person_picker"]) {
+      expect(form.computeHelper?.({ name })).toBe("");
+    }
+  });
+
+  it("leaves the snooze durations field empty rather than pre-filling the defaults", async () => {
+    // A pre-filled field would be saved back as a permanent override of
+    // every target's own `snooze_minutes`.
+    const editor = await mountEditor<SwitchboardAlertsCardEditor>(
+      "switchboard-alerts-card-editor",
+      base,
+    );
+    const form = editor.shadowRoot?.querySelector("ha-form") as HTMLElement & {
+      data?: Record<string, unknown>;
+    };
+    expect(form.data?.snooze_minutes).toEqual([]);
   });
 
   it("emits a config-changed payload without empty keys", async () => {
@@ -219,5 +251,22 @@ describe("switchboard-silence-tile-editor", () => {
       await import("../src/cards/silence-tile/switchboard-silence-tile");
     const tile = new SwitchboardSilenceTile();
     expect(() => tile.setConfig(config() as LovelaceCardConfig)).not.toThrow();
+  });
+});
+
+describe("switchboard-silence-tile-editor wake_time helper", () => {
+  it("marks wake_time as optional since router 0.7.0, and nothing else", async () => {
+    const editor = await mountEditor<SwitchboardSilenceTileEditor>(
+      "switchboard-silence-tile-editor",
+      { type: "custom:switchboard-silence-tile", person: "person.alice" },
+    );
+    const form = editor.shadowRoot?.querySelector("ha-form") as HTMLElement & {
+      computeHelper?: (schema: { name: string }) => string;
+    };
+    expect(form.computeHelper?.({ name: "wake_time" })).toMatch(
+      /Optional since Notify Switchboard 0\.7\.0/,
+    );
+    expect(form.computeHelper?.({ name: "person" })).toBe("");
+    expect(form.computeHelper?.({ name: "title" })).toBe("");
   });
 });

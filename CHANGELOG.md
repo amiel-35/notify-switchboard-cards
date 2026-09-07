@@ -7,15 +7,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-07
+
+Consumes Notify Switchboard 0.7.0. Nothing here is required: against an
+older router every 0.1.x behaviour is unchanged.
+
+### Added
+
+- Both cards read `sensor.switchboard_routing_table` (router 0.7.0) and
+  derive from it what they used to demand in YAML.
+  `switchboard-alerts-card` derives each alert's target slug (from the
+  row's `alert_entity`), that target's own `snooze_minutes` and its
+  `allow_acknowledge`; `switchboard-silence-tile` derives the tile
+  person's `wake_time`. `target_map`, `snooze_minutes` and `wake_time`
+  remain as **overrides** — set, they still win — and both editors now
+  mark them "optional since Notify Switchboard 0.7.0".
+- `switchboard-alerts-card` shows "Acknowledged by …" on an acknowledged
+  alert, from the `person` / `user_id` the router 0.7.0 puts in the
+  `acknowledged` payload of `event.switchboard_delivery`. The event
+  entity keeps only its last event, so the line shows while that last
+  event is this target's acknowledgement and disappears afterwards —
+  the router publishes authorship nowhere else. A person the router could
+  not resolve is shown as a shortened user id, never guessed at.
+- `switchboard-alerts-card` option `person_picker` (default `false`): on a
+  kiosk or wall tablet, Snooze first asks *who* it is for, listing the
+  persons from the routing table by their `person.*` name plus an
+  explicit "Everyone". Acknowledge never asks — the router reads the
+  acting user from the call itself. The chooser is plain focusable
+  buttons at the 48 px touch target, in the same disclosure as the
+  durations, and forgets the choice when it closes.
+
+### Changed
+
+- A target that the routing table marks `allow_acknowledge: false` is
+  acknowledged with the native `alert.turn_off` instead of
+  `notify_switchboard.acknowledge`, which the router would refuse.
+- `snooze_minutes` and `wake_time` are no longer defaulted in
+  `setConfig`, and the alerts editor no longer pre-fills the snooze
+  durations field. A stored default was indistinguishable from a
+  deliberate choice and would have shadowed the routing table forever.
+  The built-in fallbacks (`[15, 60, 480]`, `07:00`) still apply when
+  neither the config nor the router says otherwise.
+
 ### Documentation
 
 - README: added a "Router version matrix" mapping each Notify Switchboard
-  router version (0.1–0.5) to what these cards show or do, and dropped the
+  router version (0.1–0.7) to what these cards show or do, and dropped the
   stale "planned for Notify Switchboard 0.2.0" / "not yet part of the
   frozen router contract" wording now that those services and entities
-  have shipped. Clarified that `target_map`, `snooze_minutes` and
-  `wake_time` stay required in the card config until router 0.7.0 ships
-  `sensor.switchboard_routing_table`.
+  have shipped.
 
 ## [0.1.1] - 2026-09-07
 

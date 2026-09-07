@@ -7,12 +7,13 @@ import type {
   LovelaceGridOptions,
 } from "../../ha-types";
 import type { SwitchboardSilenceTileConfig } from "../../types";
-import { DEFAULT_WAKE_TIME } from "../../types";
+import { DEFAULT_WAKE_TIME, ROUTING_TABLE_ENTITY } from "../../types";
 import { sharedStyles } from "../../styles/shared-styles";
 import { t } from "../../i18n";
 import { formatRelativeDuration } from "../../utils/format-duration";
 import { minutesUntilWakeTime } from "../../utils/wake-time";
 import { hasRouterService, SWITCHBOARD_DOMAIN } from "../../utils/router-services";
+import { readRoutingTable, wakeTimeForPerson } from "../../utils/routing-table";
 import {
   validateEntityId,
   validateOptionalString,
@@ -105,8 +106,22 @@ export class SwitchboardSilenceTile extends LitElement implements LovelaceCard {
 
     const validated: SwitchboardSilenceTileConfig = {
       ...(config as SwitchboardSilenceTileConfig),
-      wake_time: validateTimeOfDay(CARD_NAME, "wake_time", raw.wake_time) ?? DEFAULT_WAKE_TIME,
     };
+
+    /*
+     * `wake_time` is deliberately not defaulted here. Router 0.7.0
+     * publishes each person's own wake time in the routing table, and a
+     * config silently carrying "07:00" would shadow it for every
+     * household whose morning is not seven o'clock. The fallback chain —
+     * option, then routing table, then 07:00 — is resolved at render
+     * time, where both sources are known.
+     */
+    const wakeTime = validateTimeOfDay(CARD_NAME, "wake_time", raw.wake_time);
+    if (wakeTime === undefined) {
+      delete validated.wake_time;
+    } else {
+      validated.wake_time = wakeTime;
+    }
 
     const person = validateEntityId(CARD_NAME, "person", raw.person, "person");
     if (person === undefined) {
@@ -176,13 +191,14 @@ export class SwitchboardSilenceTile extends LitElement implements LovelaceCard {
     const person = this._config?.person;
     const objectId = this._objectId();
     if (!person || !objectId) {
-      return person ? [person] : [];
+      return person ? [person, ROUTING_TABLE_ENTITY] : [ROUTING_TABLE_ENTITY];
     }
     return [
       person,
       `binary_sensor.${objectId}_silenced`,
       `sensor.${objectId}_active_snoozes`,
       `sensor.${objectId}_last_notification`,
+      ROUTING_TABLE_ENTITY,
     ];
   }
 
@@ -244,7 +260,7 @@ export class SwitchboardSilenceTile extends LitElement implements LovelaceCard {
               : nothing
           }
           ${this._renderSilencedStatus(silencedState)} ${this._renderSnoozes(snoozesState)}
-          ${this._renderLastNotification(lastNotificationState)} ${this._renderActions(config)}
+          ${this._renderLastNotification(lastNotificationState)} ${this._renderActions()}
         </div>
       </ha-card>
     `;
@@ -320,14 +336,30 @@ export class SwitchboardSilenceTile extends LitElement implements LovelaceCard {
     `;
   }
 
-  private _renderActions(config: SwitchboardSilenceTileConfig): TemplateResult {
+  /**
+   * The wake time "Until wake" silences until: the card's own option
+   * first, then this person's `wake_time` from
+   * `sensor.switchboard_routing_table` (router 0.7.0), then 07:00. With
+   * an older router the middle step simply is not there and the
+   * behaviour is the 0.1.x one.
+   */
+  private _wakeTime(): string {
+    const configured = this._config?.wake_time;
+    if (configured) {
+      return configured;
+    }
+    const derived = wakeTimeForPerson(readRoutingTable(this.hass), this._config?.person);
+    return derived ?? DEFAULT_WAKE_TIME;
+  }
+
+  private _renderActions(): TemplateResult {
     const hass = this.hass;
     if (!hass) return html``;
 
     const canSilence = hasRouterService(hass, "silence");
     const canUnsnooze = hasRouterService(hass, "unsnooze");
     const canUnsilence = hasRouterService(hass, "unsilence");
-    const wakeTime = config.wake_time ?? DEFAULT_WAKE_TIME;
+    const wakeTime = this._wakeTime();
     const wakeMinutes = minutesUntilWakeTime(wakeTime, new Date(), hass.config?.time_zone);
     const explanation = t(hass, "silence.service_unavailable");
     const anyMissing = !canSilence || !canUnsnooze || !canUnsilence;

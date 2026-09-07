@@ -5,6 +5,7 @@ export const fr: Record<TranslationKey, string> = {
   "alerts.empty": "Aucune alerte active",
   "alerts.state.active": "Active",
   "alerts.state.acknowledged": "Acquittée",
+  "alerts.acknowledged_by": "Acquittée par {name}",
   "alerts.state.unavailable": "Indisponible",
   "alerts.action.acknowledge": "Acquitter",
   "alerts.action.unacknowledge": "Annuler l'acquittement",
@@ -12,6 +13,10 @@ export const fr: Record<TranslationKey, string> = {
   "alerts.action.snooze_minutes": "Reporter {minutes} min",
   "alerts.action.snooze_minutes_everyone": "Reporter pour tout le monde · {minutes} min",
   "alerts.action.more_info": "Afficher le détail de {name}",
+  "alerts.picker.prompt": "Reporter pour qui ?",
+  "alerts.picker.everyone": "Tout le monde",
+  "alerts.picker.chosen": "Pour : {name}",
+  "alerts.picker.change": "Changer",
   "alerts.dialog.close": "Fermer",
   "alerts.badge.label":
     "{active} active(s), {acknowledged} acquittée(s), {unavailable} indisponible(s)",
@@ -48,7 +53,10 @@ export const fr: Record<TranslationKey, string> = {
   "editor.target_map": "Correspondance des cibles (alert.entity_id : slug)",
   "editor.snooze_minutes": "Durées de report (minutes)",
   "editor.person": "Entité personne",
+  "editor.person_picker": "Demander pour qui reporter (kiosque)",
   "editor.wake_time": "Heure de réveil (HH:MM)",
+  "editor.derived_since_0_7_0":
+    "Facultatif depuis Notify Switchboard 0.7.0 : déduit de sensor.switchboard_routing_table si laissé vide.",
   "editor.form_unavailable":
     "L'éditeur de formulaire Home Assistant (ha-form) n'est pas disponible ici. Modifiez cette carte en YAML.",
 };

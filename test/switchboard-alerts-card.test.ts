@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import "../src/cards/alerts-card/switchboard-alerts-card";
 import type { SwitchboardAlertsCard } from "../src/cards/alerts-card/switchboard-alerts-card";
 import type { SwitchboardAlertsCardConfig } from "../src/types";
+import { DELIVERY_EVENT_ENTITY, ROUTING_TABLE_ENTITY } from "../src/types";
 import { createFakeHass, fakeEntity, withUpdatedStates } from "./fake-hass";
 
 async function mountCard(
@@ -684,5 +685,389 @@ describe("switchboard-alerts-card shouldUpdate", () => {
     card.hass = withUpdatedStates(card.hass, fakeEntity("alert.leak", "off"));
     await card.updateComplete;
     expect(renderSpy).toHaveBeenCalled();
+  });
+});
+
+/**
+ * Router 0.7.0's `sensor.switchboard_routing_table`, in the shape the
+ * contract freezes (§"`sensor.switchboard_routing_table`").
+ */
+function routingTable(
+  targets: Array<Record<string, unknown>>,
+  persons: Array<Record<string, unknown>> = [],
+) {
+  return fakeEntity(ROUTING_TABLE_ENTITY, String(targets.length), {
+    attributes: { targets, persons },
+  });
+}
+
+const LEAK_TARGET = {
+  slug: "leak",
+  name: "Water leak",
+  alert_entity: "alert.leak",
+  snooze_minutes: [10, 30],
+  allow_acknowledge: true,
+  audience: ["person.alice"],
+};
+
+describe("switchboard-alerts-card options derived from the routing table", () => {
+  let cards: SwitchboardAlertsCard[] = [];
+
+  afterEach(() => {
+    for (const card of cards) card.remove();
+    cards = [];
+  });
+
+  it("offers snooze with no target_map at all, deriving the slug from the router", async () => {
+    const hass = createFakeHass({
+      states: [fakeEntity("alert.leak", "on"), routingTable([LEAK_TARGET])],
+      services: { notify_switchboard: { snooze: {} } },
+    });
+    const card = await mountCard({ type: "custom:switchboard-alerts-card", mode: "full" }, hass);
+    cards.push(card);
+
+    expect(card.shadowRoot?.querySelector(".snooze-menu")).not.toBeNull();
+    // The target's own durations, not the card's built-in [15, 60, 480].
+    buttonWithText(card, "Snooze for everyone · 30 min")?.click();
+    await card.updateComplete;
+    expect(hass.callService).toHaveBeenCalledWith("notify_switchboard", "snooze", {
+      target: "leak",
+      minutes: 30,
+    });
+    expect(buttonWithText(card, "Snooze for everyone · 15 min")).toBeUndefined();
+  });
+
+  it("acknowledges through the router service once the table names the target", async () => {
+    const hass = createFakeHass({
+      states: [fakeEntity("alert.leak", "on"), routingTable([LEAK_TARGET])],
+      services: { notify_switchboard: { acknowledge: {} } },
+    });
+    const card = await mountCard({ type: "custom:switchboard-alerts-card", mode: "full" }, hass);
+    cards.push(card);
+
+    buttonWithText(card, "Acknowledge")?.click();
+    await card.updateComplete;
+    expect(hass.callService).toHaveBeenCalledWith("notify_switchboard", "acknowledge", {
+      target: "leak",
+    });
+  });
+
+  it("falls back to alert.turn_off for a target that refuses acknowledgement", async () => {
+    const hass = createFakeHass({
+      states: [
+        fakeEntity("alert.leak", "on"),
+        routingTable([{ ...LEAK_TARGET, allow_acknowledge: false }]),
+      ],
+      services: { notify_switchboard: { acknowledge: {} } },
+    });
+    const card = await mountCard({ type: "custom:switchboard-alerts-card", mode: "full" }, hass);
+    cards.push(card);
+
+    buttonWithText(card, "Acknowledge")?.click();
+    await card.updateComplete;
+    expect(hass.callService).toHaveBeenCalledWith("alert", "turn_off", {
+      entity_id: "alert.leak",
+    });
+  });
+
+  it("keeps the configured options winning over the routing table", async () => {
+    const hass = createFakeHass({
+      states: [fakeEntity("alert.leak", "on"), routingTable([LEAK_TARGET])],
+      services: { notify_switchboard: { snooze: {} } },
+    });
+    const card = await mountCard(
+      {
+        type: "custom:switchboard-alerts-card",
+        mode: "full",
+        target_map: { "alert.leak": "leak_override" },
+        snooze_minutes: [45],
+      },
+      hass,
+    );
+    cards.push(card);
+
+    buttonWithText(card, "Snooze for everyone · 45 min")?.click();
+    await card.updateComplete;
+    expect(hass.callService).toHaveBeenCalledWith("notify_switchboard", "snooze", {
+      target: "leak_override",
+      minutes: 45,
+    });
+  });
+
+  it("re-renders when the routing table changes", async () => {
+    const hass = createFakeHass({
+      states: [fakeEntity("alert.leak", "on")],
+      services: { notify_switchboard: { snooze: {} } },
+    });
+    const card = await mountCard({ type: "custom:switchboard-alerts-card", mode: "full" }, hass);
+    cards.push(card);
+    expect(card.shadowRoot?.querySelector(".snooze-menu")).toBeNull();
+
+    card.hass = withUpdatedStates(hass, routingTable([LEAK_TARGET]));
+    await card.updateComplete;
+    expect(card.shadowRoot?.querySelector(".snooze-menu")).not.toBeNull();
+  });
+});
+
+describe("switchboard-alerts-card acknowledged-by", () => {
+  let cards: SwitchboardAlertsCard[] = [];
+
+  afterEach(() => {
+    for (const card of cards) card.remove();
+    cards = [];
+  });
+
+  const deliveryEvent = (eventType: string, payload: Record<string, unknown>) =>
+    fakeEntity(DELIVERY_EVENT_ENTITY, "2026-09-07T10:00:00+00:00", {
+      attributes: { event_type: eventType, ...payload },
+    });
+
+  const acknowledged = () =>
+    deliveryEvent("acknowledged", {
+      target: "leak",
+      alert_entity: "alert.leak",
+      user_id: "0123456789abcdef",
+      person: "person.alice",
+    });
+
+  const alice = () =>
+    fakeEntity("person.alice", "home", { attributes: { friendly_name: "Alice" } });
+
+  it("names who acknowledged an acknowledged alert", async () => {
+    const hass = createFakeHass({
+      states: [
+        fakeEntity("alert.leak", "off"),
+        routingTable([LEAK_TARGET]),
+        acknowledged(),
+        alice(),
+      ],
+    });
+    const card = await mountCard({ type: "custom:switchboard-alerts-card", mode: "full" }, hass);
+    cards.push(card);
+
+    expect(card.shadowRoot?.querySelector(".acknowledged-by")?.textContent?.trim()).toBe(
+      "Acknowledged by Alice",
+    );
+  });
+
+  it("says nothing on an alert that is still active", async () => {
+    const hass = createFakeHass({
+      states: [
+        fakeEntity("alert.leak", "on"),
+        routingTable([LEAK_TARGET]),
+        acknowledged(),
+        alice(),
+      ],
+    });
+    const card = await mountCard({ type: "custom:switchboard-alerts-card", mode: "full" }, hass);
+    cards.push(card);
+
+    expect(card.shadowRoot?.querySelector(".acknowledged-by")).toBeNull();
+  });
+
+  it("says nothing once a later event replaced the acknowledgement", async () => {
+    const hass = createFakeHass({
+      states: [
+        fakeEntity("alert.leak", "off"),
+        routingTable([LEAK_TARGET]),
+        deliveryEvent("routed", { target: "leak", person: "person.alice" }),
+        alice(),
+      ],
+    });
+    const card = await mountCard({ type: "custom:switchboard-alerts-card", mode: "full" }, hass);
+    cards.push(card);
+
+    expect(card.shadowRoot?.querySelector(".acknowledged-by")).toBeNull();
+  });
+
+  it("does not attribute one target's acknowledgement to another alert", async () => {
+    const hass = createFakeHass({
+      states: [
+        fakeEntity("alert.door", "off"),
+        routingTable([LEAK_TARGET, { ...LEAK_TARGET, slug: "door", alert_entity: "alert.door" }]),
+        acknowledged(),
+        alice(),
+      ],
+    });
+    const card = await mountCard({ type: "custom:switchboard-alerts-card", mode: "full" }, hass);
+    cards.push(card);
+
+    expect(card.shadowRoot?.querySelector(".acknowledged-by")).toBeNull();
+  });
+
+  it("says nothing at all against a router that publishes no authorship", async () => {
+    const hass = createFakeHass({
+      states: [
+        fakeEntity("alert.leak", "off"),
+        routingTable([LEAK_TARGET]),
+        deliveryEvent("acknowledged", { target: "leak", user_id: null }),
+      ],
+    });
+    const card = await mountCard({ type: "custom:switchboard-alerts-card", mode: "full" }, hass);
+    cards.push(card);
+
+    expect(card.shadowRoot?.querySelector(".acknowledged-by")).toBeNull();
+  });
+});
+
+describe("switchboard-alerts-card kiosk person picker", () => {
+  let cards: SwitchboardAlertsCard[] = [];
+
+  afterEach(() => {
+    for (const card of cards) card.remove();
+    cards = [];
+  });
+
+  const PERSONS = [
+    { entity_id: "person.alice", wake_time: "07:00:00", summary: true },
+    { entity_id: "person.bob", wake_time: null, summary: true },
+  ];
+
+  async function mountPicker(
+    overrides: Partial<SwitchboardAlertsCardConfig> = {},
+  ): Promise<{ card: SwitchboardAlertsCard; hass: ReturnType<typeof createFakeHass> }> {
+    const hass = createFakeHass({
+      states: [
+        fakeEntity("alert.leak", "on"),
+        routingTable([{ ...LEAK_TARGET, snooze_minutes: [15] }], PERSONS),
+        fakeEntity("person.alice", "home", { attributes: { friendly_name: "Alice" } }),
+        fakeEntity("person.bob", "home", { attributes: { friendly_name: "Bob" } }),
+      ],
+      services: { notify_switchboard: { snooze: {} } },
+    });
+    const card = await mountCard(
+      {
+        type: "custom:switchboard-alerts-card",
+        mode: "full",
+        person_picker: true,
+        ...overrides,
+      } as SwitchboardAlertsCardConfig,
+      hass,
+    );
+    cards.push(card);
+    return { card, hass };
+  }
+
+  it("is off by default: the durations show straight away", async () => {
+    const hass = createFakeHass({
+      states: [fakeEntity("alert.leak", "on"), routingTable([LEAK_TARGET], PERSONS)],
+      services: { notify_switchboard: { snooze: {} } },
+    });
+    const card = await mountCard({ type: "custom:switchboard-alerts-card", mode: "full" }, hass);
+    cards.push(card);
+
+    expect(card.shadowRoot?.querySelector(".picker-step")).toBeNull();
+    expect(card.shadowRoot?.querySelector(".snooze-options")).not.toBeNull();
+  });
+
+  it("asks who first, listing the routing table's persons plus everyone", async () => {
+    const { card } = await mountPicker();
+
+    expect(card.shadowRoot?.querySelector(".snooze-options")).toBeNull();
+    const names = Array.from(card.shadowRoot?.querySelectorAll(".picker-step button") ?? []).map(
+      (button) => button.textContent?.trim(),
+    );
+    expect(names).toEqual(["Alice", "Bob", "Everyone"]);
+  });
+
+  it("passes the chosen person to notify_switchboard.snooze", async () => {
+    const { card, hass } = await mountPicker();
+
+    buttonWithText(card, "Bob")?.click();
+    await card.updateComplete;
+
+    buttonWithText(card, "Snooze 15 min")?.click();
+    await card.updateComplete;
+    expect(hass.callService).toHaveBeenCalledWith("notify_switchboard", "snooze", {
+      target: "leak",
+      minutes: 15,
+      person: "person.bob",
+    });
+  });
+
+  it("sends no person when 'Everyone' is chosen, even with person configured", async () => {
+    const { card, hass } = await mountPicker({ person: "person.alice" });
+
+    buttonWithText(card, "Everyone")?.click();
+    await card.updateComplete;
+
+    buttonWithText(card, "Snooze for everyone · 15 min")?.click();
+    await card.updateComplete;
+    expect(hass.callService).toHaveBeenCalledWith("notify_switchboard", "snooze", {
+      target: "leak",
+      minutes: 15,
+    });
+  });
+
+  it("lets the choice be changed before the duration is picked", async () => {
+    const { card } = await mountPicker();
+
+    buttonWithText(card, "Alice")?.click();
+    await card.updateComplete;
+    expect(card.shadowRoot?.querySelector(".picker-chosen")?.textContent).toContain("Alice");
+
+    card.shadowRoot?.querySelector<HTMLButtonElement>(".picker-change")?.click();
+    await card.updateComplete;
+    expect(card.shadowRoot?.querySelector(".picker-step")).not.toBeNull();
+  });
+
+  it("moves focus into the step that replaced the one just used", async () => {
+    const { card } = await mountPicker();
+
+    buttonWithText(card, "Alice")?.click();
+    await card.updateComplete;
+    await card.updateComplete;
+    expect(
+      (card.shadowRoot?.activeElement as HTMLElement | null)?.classList.contains("action-button"),
+    ).toBe(true);
+    expect(card.shadowRoot?.activeElement?.textContent?.trim()).toBe("Snooze 15 min");
+
+    card.shadowRoot?.querySelector<HTMLButtonElement>(".picker-change")?.click();
+    await card.updateComplete;
+    await card.updateComplete;
+    expect(card.shadowRoot?.activeElement?.textContent?.trim()).toBe("Alice");
+  });
+
+  it("keeps every picker control at the 48px touch target", async () => {
+    const { card } = await mountPicker();
+    const buttons = Array.from(card.shadowRoot?.querySelectorAll(".picker-step button") ?? []);
+    expect(buttons.length).toBeGreaterThan(0);
+    for (const button of buttons) {
+      expect(button.classList.contains("touch-target")).toBe(true);
+      // Real <button>s: reachable by Tab without any tabindex juggling.
+      expect(button.tagName).toBe("BUTTON");
+    }
+  });
+
+  it("never appears when the routing table names nobody", async () => {
+    const hass = createFakeHass({
+      states: [fakeEntity("alert.leak", "on"), routingTable([LEAK_TARGET], [])],
+      services: { notify_switchboard: { snooze: {} } },
+    });
+    const card = await mountCard(
+      { type: "custom:switchboard-alerts-card", mode: "full", person_picker: true },
+      hass,
+    );
+    cards.push(card);
+
+    expect(card.shadowRoot?.querySelector(".picker-step")).toBeNull();
+    expect(card.shadowRoot?.querySelector(".snooze-options")).not.toBeNull();
+  });
+
+  it("forgets the choice when the menu is closed again", async () => {
+    const { card } = await mountPicker();
+
+    buttonWithText(card, "Alice")?.click();
+    await card.updateComplete;
+    expect(card.shadowRoot?.querySelector(".snooze-options")).not.toBeNull();
+
+    const details = card.shadowRoot?.querySelector("details") as HTMLDetailsElement;
+    details.open = true;
+    details.dispatchEvent(new Event("toggle"));
+    details.open = false;
+    details.dispatchEvent(new Event("toggle"));
+    await card.updateComplete;
+
+    expect(card.shadowRoot?.querySelector(".picker-step")).not.toBeNull();
   });
 });

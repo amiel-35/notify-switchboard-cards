@@ -29,7 +29,7 @@ Two cards are included:
 Captured against a real Home Assistant 2026.9 instance with
 `scripts/screenshots.mjs` (see [CONTRIBUTING.md](CONTRIBUTING.md)).
 
-> **Note:** these cards (currently 0.1.1) target [Notify Switchboard](https://github.com/amiel-35/notify-switchboard) 0.5.1 and degrade gracefully against any earlier router release. See the [Router version matrix](#router-version-matrix) below for exactly what each router version unlocks — below 0.2, the silence tile's buttons stay disabled (with an explanation) and the snooze menu is hidden; acknowledging falls back to `alert.turn_off`.
+> **Note:** these cards (currently 0.2.0) target [Notify Switchboard](https://github.com/amiel-35/notify-switchboard) 0.7.0 and degrade gracefully against any earlier router release. See the [Router version matrix](#router-version-matrix) below for exactly what each router version unlocks — from 0.7.0 the cards derive `target_map`, `snooze_minutes` and `wake_time` from the router itself; below 0.2, the silence tile's buttons stay disabled (with an explanation) and the snooze menu is hidden, and acknowledging falls back to `alert.turn_off`.
 
 ## Compatibility
 
@@ -43,6 +43,12 @@ The alerts card additionally shows a small "today" footer when the
 instance-wide entities `sensor.switchboard_dropped_today` and
 `event.switchboard_delivery` exist. Neither is required: when they are
 absent (or `unknown` / `unavailable`), the footer is simply not rendered.
+
+Since router 0.7.0 both cards also read `sensor.switchboard_routing_table`
+— the two closed attributes `targets` and `persons` — to derive options
+the user used to have to restate in YAML. It is read defensively: a
+missing, `unavailable` or malformed entity simply derives nothing, and the
+cards behave exactly as they did in 0.1.x.
 
 The router's dedicated services (`notify_switchboard.acknowledge`,
 `snooze`, `silence`, `unsnooze`, `unsilence`) shipped in Notify
@@ -66,11 +72,14 @@ feature became available, and what it changes in these cards:
 | 0.3.x | Translated entity names, frozen entity ids: `binary_sensor.<person>_silenced`, `sensor.<person>_active_snoozes`, `sensor.switchboard_deferred_today` | No visible change — the cards already target these ids; 0.3 just guarantees they won't move. |
 | 0.4.x | `notify_switchboard.explain` response service | No effect on these cards; neither card calls `explain` yet. |
 | 0.5.x | Wake-time summary notifications (tagged `switchboard-summary`), episode `done` filtering | No effect on these cards; they read entity/alert state, not notification content. |
-| 0.7.0 (not yet released) | `sensor.switchboard_routing_table`, `acknowledged` event payload with `user_id` / `person` | Not yet consumed. Once released, a future cards release (0.2.0) will read the routing table to derive `target_map`, `snooze_minutes` and `wake_time` instead of requiring them in the card config. |
+| 0.6.x | Five-field target editor, one vocabulary | No effect on these cards; the entity and service surface they read is unchanged. |
+| 0.7.0 | `sensor.switchboard_routing_table`; `acknowledged` event payload with `user_id` / `person` | **`target_map`, `snooze_minutes` and `wake_time` become optional**: the cards derive each alert's slug, each target's own snooze durations and `allow_acknowledge`, and each person's wake time from the routing table. The alerts card shows "Acknowledged by …" for the last acknowledgement, and the kiosk person picker (`person_picker: true`) can offer the router's persons. |
 
-Until router 0.7.0 ships, `target_map`, `snooze_minutes` and `wake_time`
-remain required in the card config — there is no entity yet to derive
-them from.
+Below router 0.7.0 there is no routing table to read, so `target_map`,
+`snooze_minutes` and `wake_time` stay in the card config exactly as
+before, and neither "Acknowledged by …" nor the person picker appears.
+Setting those options against a 0.7.0 router is still legitimate: they
+are overrides, and they win.
 
 ## Installation
 
@@ -106,10 +115,12 @@ show_acknowledged: true
 entities:
   - alert.leak_kitchen
   - alert.door_left_open
+# Every option below is optional against router 0.7.0 and later.
 target_map:
   alert.leak_kitchen: leak
 snooze_minutes: [15, 60, 480]
-person: person.alice # optional
+person: person.alice
+person_picker: false
 ```
 
 - `entities` — list of `alert.*` entity ids. Defaults to every `alert.*`
@@ -126,20 +137,33 @@ person: person.alice # optional
 - `show_acknowledged` — whether acknowledged (`off`-state) alerts are
   listed alongside active ones. Idle alerts are never listed; unavailable
   ones always are.
-- `target_map` — maps an `alert.*` entity to its Notify Switchboard target
-  slug (the `notify.switchboard_<slug>` row), so Acknowledge can call
-  `notify_switchboard.acknowledge` and the Snooze menu can appear once
-  router 0.2.0 or later is installed (see the
-  [Router version matrix](#router-version-matrix)). Without a mapping,
-  Acknowledge always falls back to `alert.turn_off`, and Snooze never
-  appears for that entity. Required today; a future cards release will
-  derive it from `sensor.switchboard_routing_table` once router 0.7.0
-  ships.
-- `snooze_minutes` — durations (positive whole minutes) offered in the
-  snooze menu. Defaults to `[15, 60, 480]`.
+- `target_map` — **optional since router 0.7.0.** Maps an `alert.*` entity
+  to its Notify Switchboard target slug (the `notify.switchboard_<slug>`
+  row), so Acknowledge can call `notify_switchboard.acknowledge` and the
+  Snooze menu can appear. From router 0.7.0 the card reads that mapping
+  out of `sensor.switchboard_routing_table` (each target's
+  `alert_entity`), so you only need this option to override the router or
+  to map an alert it does not own. Without a mapping from either source,
+  Acknowledge falls back to `alert.turn_off` and Snooze never appears for
+  that entity.
+- `snooze_minutes` — **optional since router 0.7.0.** Durations (positive
+  whole minutes) offered in the snooze menu. Left unset, each target's own
+  `snooze_minutes` from the routing table is used, falling back to
+  `[15, 60, 480]` when the router publishes none. Set, it applies to every
+  target on the card.
 - `person` — optional `person.*` entity the snooze applies to. **Without
   it, `notify_switchboard.snooze` snoozes the target for the whole
   audience**, and the menu says so ("Snooze for everyone · 15 min").
+- `person_picker` — `true` turns Snooze into two steps on the card
+  itself: who, then how long. The chooser lists the persons the routing
+  table publishes (named from their `person.*` state) plus an explicit
+  "Everyone", and what you pick is the `person` passed to
+  `notify_switchboard.snooze` for that one call — it overrides the
+  `person` option and is forgotten when the menu closes. Intended for a
+  shared wall tablet, where the card has no idea who is standing in front
+  of it. Acknowledge never asks: the router reads the acting user from the
+  call's own context. Defaults to `false`, and never appears when the
+  routing table names nobody (router below 0.7.0 included).
 
 Every option is validated in `setConfig`: a bad shape (for instance
 `entities: alert.leak` as a bare string, or `mode: tiny`) produces a
@@ -149,6 +173,16 @@ renders wrong or throws mid-render.
 Alert entities in `unavailable` or `unknown` are shown as a distinct
 fourth state — a neutral "Unavailable" chip with a `mdi:help-circle-outline`
 icon and no actions. They are never counted or styled as acknowledged.
+
+An acknowledged alert also shows **"Acknowledged by …"** when the router
+(0.7.0 and later) says who did it. Authorship lives in the `acknowledged`
+payload of `event.switchboard_delivery` and nowhere else — no sensor, no
+stored record — and a Home Assistant event entity keeps only its **last**
+event. So the line is shown while the last delivery event is this target's
+acknowledgement, and disappears as soon as any later routing event
+replaces it. When the router could not resolve the acting user to a
+`person.*`, a shortened user id is shown rather than a guess; when it
+knows neither, nothing is shown.
 
 Clicking an alert's name opens Home Assistant's more-info dialog for it.
 
@@ -164,9 +198,13 @@ title: Alice
 - `person` — a `person.*` entity. The tile derives
   `binary_sensor.<object_id>_silenced`, `sensor.<object_id>_active_snoozes`
   and `sensor.<object_id>_last_notification` from it.
-- `wake_time` — 24h `HH:MM`, used by "Until wake" to compute how many
-  minutes to silence for. Computed on the **Home Assistant instance's**
-  clock (`hass.config.time_zone`), not the browser's. Defaults to `07:00`.
+- `wake_time` — **optional since router 0.7.0.** 24h `HH:MM`, used by
+  "Until wake" to compute how many minutes to silence for. Left unset, the
+  tile reads this person's own `wake_time` from
+  `sensor.switchboard_routing_table` (the router publishes it as
+  `HH:MM:SS`), falling back to `07:00` when neither is available. Computed
+  on the **Home Assistant instance's** clock (`hass.config.time_zone`),
+  not the browser's.
 
 The tile's four controls map one-to-one onto router services: "Silence 1 h"
 and "Until wake" call `notify_switchboard.silence`, "Clear snoozes" calls

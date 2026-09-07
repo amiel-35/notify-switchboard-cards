@@ -53,6 +53,14 @@ export class SwitchboardSilenceTileEditor extends LitElement implements Lovelace
   private _computeLabel = (schema: { name: string }): string =>
     t(this.hass, `editor.${schema.name}` as TranslationKey);
 
+  /**
+   * `wake_time` became optional with router 0.7.0: left empty, the tile
+   * reads this person's own wake time from
+   * `sensor.switchboard_routing_table`.
+   */
+  private _computeHelper = (schema: { name: string }): string =>
+    schema.name === "wake_time" ? t(this.hass, "editor.derived_since_0_7_0") : "";
+
   private _valueChanged = (event: CustomEvent<HaFormValueChangedDetail>): void => {
     event.stopPropagation();
     const value = { ...(event.detail?.value ?? {}) };
@@ -83,6 +91,7 @@ export class SwitchboardSilenceTileEditor extends LitElement implements Lovelace
         .data=${this._config}
         .schema=${SCHEMA}
         .computeLabel=${this._computeLabel}
+        .computeHelper=${this._computeHelper}
         @value-changed=${this._valueChanged}
       ></ha-form>
     `;

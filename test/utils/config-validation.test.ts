@@ -64,6 +64,13 @@ describe("switchboard-alerts-card setConfig validation", () => {
     expect(() => setAlerts({ snooze_minutes: [15, 60, 480] })).not.toThrow();
   });
 
+  it("rejects a `person_picker` that is not a boolean", () => {
+    expect(() => setAlerts({ person_picker: "yes" })).toThrow(/"person_picker"/);
+    expect(() => setAlerts({ person_picker: 1 })).toThrow(/"person_picker"/);
+    expect(() => setAlerts({ person_picker: true })).not.toThrow();
+    expect(() => setAlerts({ person_picker: false })).not.toThrow();
+  });
+
   it("rejects a `mode` outside {compact, full}", () => {
     expect(() => setAlerts({ mode: "tiny" })).toThrow(/"mode"/);
     expect(() => setAlerts({ mode: 1 })).toThrow(/"mode"/);
