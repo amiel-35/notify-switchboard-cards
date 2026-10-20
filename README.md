@@ -1,4 +1,20 @@
-# Notify Switchboard Cards
+# Notify Switchboard Cards — moved
+
+> **These cards now ship with [Notify Switchboard](https://github.com/amiel-35/notify-switchboard)
+> itself, from version 0.10.0.** This repository is archived and receives no
+> further release.
+>
+> - Install or update **Notify Switchboard** to 0.10.0 or later: the cards
+>   come with it and are added to your dashboards' resources automatically.
+> - Then remove **Notify Switchboard Cards** from HACS (or delete the
+>   `/hacsfiles/notify-switchboard-cards/…` or `/local/notify-switchboard-cards.js`
+>   resource if you added it by hand). Notify Switchboard raises a repair
+>   while the old copy is still loaded.
+> - Your card configurations need no change: the card types are the same.
+>
+> Documentation: [docs/cards.md](https://github.com/amiel-35/notify-switchboard/blob/main/docs/cards.md).
+> The text below describes the last release from this repository, 0.2.0.
+
 
 Lovelace custom cards for [Notify Switchboard](https://github.com/amiel-35/notify-switchboard),
 the Home Assistant integration that routes the core `alert` integration's
